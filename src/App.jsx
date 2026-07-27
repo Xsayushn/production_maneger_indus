@@ -18,6 +18,23 @@ export default function App() {
   const [parts, setParts] = useState([]);
   const [machines, setMachines] = useState([]);
 
+  // Fetch Public Worker Roster for Login Dropdown
+  const fetchPublicWorkers = async () => {
+    try {
+      const res = await fetch('/api/auth/public-workers');
+      if (res.ok) {
+        const data = await res.json();
+        setWorkers(data);
+      }
+    } catch (err) {
+      console.error('Error fetching public worker roster:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchPublicWorkers();
+  }, []);
+
   // Authenticated API Helper
   const authFetch = async (url, options = {}) => {
     const headers = {
@@ -28,13 +45,12 @@ export default function App() {
 
     const res = await fetch(url, { ...options, headers });
     if (res.status === 401 || res.status === 403) {
-      // Token expired or invalid -> Logout user safely
       handleLogout();
     }
     return res;
   };
 
-  // Fetch Master Data using authenticated requests
+  // Fetch Master Data for authenticated user
   const fetchMasterData = async () => {
     if (!authToken) return;
     try {
@@ -53,7 +69,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchMasterData();
+    if (authToken) {
+      fetchMasterData();
+    }
   }, [authToken]);
 
   // Handle Login Event
@@ -70,6 +88,7 @@ export default function App() {
     setAuthToken('');
     localStorage.removeItem('indus_user');
     localStorage.removeItem('indus_token');
+    fetchPublicWorkers();
   };
 
   const handleWorkerAdded = (newWorker) => {

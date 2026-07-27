@@ -74,18 +74,10 @@ export const initDb = async () => {
     )
   `);
 
-  // Migrations for existing database: Add password_hash column if missing
-  try {
-    await run(`ALTER TABLE workers ADD COLUMN password_hash TEXT`);
-  } catch (e) { /* Column already exists */ }
-
-  try {
-    await run(`ALTER TABLE workers ADD COLUMN department TEXT DEFAULT 'Production Line'`);
-  } catch (e) { /* Column already exists */ }
-
-  try {
-    await run(`ALTER TABLE workers ADD COLUMN shift TEXT DEFAULT 'A'`);
-  } catch (e) { /* Column already exists */ }
+  // Migrations for existing database
+  try { await run(`ALTER TABLE workers ADD COLUMN password_hash TEXT`); } catch (e) {}
+  try { await run(`ALTER TABLE workers ADD COLUMN department TEXT DEFAULT 'Production Line'`); } catch (e) {}
+  try { await run(`ALTER TABLE workers ADD COLUMN shift TEXT DEFAULT 'A'`); } catch (e) {}
 
   // Machines table
   await run(`
@@ -161,6 +153,13 @@ export const initDb = async () => {
     const hash = await bcrypt.hash(adminPassword, 10);
     await run(`INSERT INTO admins (username, password_hash, role) VALUES ('admin', ?, 'admin')`, [hash]);
     console.log('Default admin account initialized securely.');
+  }
+
+  // Auto-seed initial worker roster if empty
+  const workerCount = await get(`SELECT COUNT(*) as count FROM workers`);
+  if (!workerCount || workerCount.count === 0) {
+    console.log('Workers table is empty. Auto-seeding initial 120-worker roster...');
+    const seedScript = await import('./seed.js');
   }
 
   console.log('Database initialized successfully.');

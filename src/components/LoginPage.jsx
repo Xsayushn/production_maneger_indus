@@ -1,10 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Wrench, Shield, User, ArrowRight, Lock, Search, Building2 } from 'lucide-react';
 
-export default function LoginPage({ workers, onLogin }) {
+export default function LoginPage({ workers = [], onLogin }) {
   const [role, setRole] = useState('worker'); // 'admin' | 'worker'
   const [adminUsername, setAdminUsername] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('admin123');
+  
+  // Local worker list fallback if prop is loading
+  const [localWorkers, setLocalWorkers] = useState(workers);
   
   // Searchable worker state
   const [searchQuery, setSearchQuery] = useState('');
@@ -12,14 +15,30 @@ export default function LoginPage({ workers, onLogin }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Keep localWorkers updated when workers prop arrives
+  useEffect(() => {
+    if (workers && workers.length > 0) {
+      setLocalWorkers(workers);
+    } else {
+      // Fallback direct fetch for public worker list
+      fetch('/api/auth/public-workers')
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          if (data && data.length > 0) setLocalWorkers(data);
+        })
+        .catch(err => console.error('Public worker list fetch error:', err));
+    }
+  }, [workers]);
+
   // Filter workers dynamically as user types
   const filteredWorkers = useMemo(() => {
-    if (!searchQuery.trim()) return workers.slice(0, 15);
+    const list = localWorkers.length > 0 ? localWorkers : workers;
+    if (!searchQuery.trim()) return list.slice(0, 15);
     const q = searchQuery.toLowerCase();
-    return workers.filter(
+    return list.filter(
       w => w.name.toLowerCase().includes(q) || w.code.toLowerCase().includes(q) || (w.department && w.department.toLowerCase().includes(q))
     ).slice(0, 25);
-  }, [searchQuery, workers]);
+  }, [searchQuery, localWorkers, workers]);
 
   const handleAdminSubmit = async (e) => {
     e.preventDefault();
@@ -183,37 +202,43 @@ export default function LoginPage({ workers, onLogin }) {
 
             {/* Quick Auto-complete Suggestions */}
             <div style={{ maxHeight: '210px', overflowY: 'auto', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '2px', padding: '4px' }}>
-              {filteredWorkers.map(w => {
-                const isSelected = selectedWorkerObj?.code === w.code;
-                return (
-                  <div
-                    key={w.id || w.code}
-                    onClick={() => {
-                      setSelectedWorkerObj(w);
-                      setSearchQuery(`${w.name} (${w.code})`);
-                    }}
-                    style={{
-                      padding: '0.55rem 0.8rem',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: isSelected ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
-                      border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid transparent',
-                      display: 'flex',
-                      justify: 'space-between',
-                      alignItems: 'center',
-                      fontSize: '0.85rem'
-                    }}
-                  >
-                    <div>
-                      <strong style={{ color: isSelected ? 'var(--accent-cyan)' : 'var(--text-main)' }}>{w.name}</strong>
-                      <span className="font-mono" style={{ marginLeft: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>{w.code}</span>
+              {filteredWorkers.length === 0 ? (
+                <div style={{ padding: '0.8rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  {localWorkers.length === 0 ? 'Loading worker roster...' : 'No matching worker found. Type your employee code.'}
+                </div>
+              ) : (
+                filteredWorkers.map(w => {
+                  const isSelected = selectedWorkerObj?.code === w.code;
+                  return (
+                    <div
+                      key={w.id || w.code}
+                      onClick={() => {
+                        setSelectedWorkerObj(w);
+                        setSearchQuery(`${w.name} (${w.code})`);
+                      }}
+                      style={{
+                        padding: '0.55rem 0.8rem',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        background: isSelected ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                        border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid transparent',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      <div>
+                        <strong style={{ color: isSelected ? 'var(--accent-cyan)' : 'var(--text-main)' }}>{w.name}</strong>
+                        <span className="font-mono" style={{ marginLeft: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>{w.code}</span>
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        <Building2 size={11} /> {w.department || 'Line A'}
+                      </span>
                     </div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                      <Building2 size={11} /> {w.department || 'Line A'}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }} disabled={loading}>

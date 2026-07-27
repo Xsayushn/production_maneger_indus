@@ -21,7 +21,7 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 // 1. Security Headers via Helmet
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Disabled CSP for inline scripts if any in Vite bundle
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
   })
 );
@@ -34,7 +34,6 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or same-origin curl)
       if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'production') {
         return callback(null, true);
       }
@@ -80,8 +79,18 @@ wss.on('connection', (ws, req) => {
 await initDb();
 
 // ----------------------------------------------------
-// AUTHENTICATION ENDPOINTS
+// PUBLIC AUTHENTICATION & LOGIN ENDPOINTS
 // ----------------------------------------------------
+
+// Public Worker Roster for Login Dropdown / Auto-Complete
+app.get('/api/auth/public-workers', async (req, res) => {
+  try {
+    const workers = await query(`SELECT id, name, code, department FROM workers WHERE status = 'active' ORDER BY name ASC`);
+    res.json(workers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Server-side Authentication (Admin & Worker Login)
 app.post('/api/auth/login', async (req, res) => {
@@ -115,8 +124,12 @@ app.post('/api/auth/login', async (req, res) => {
       let worker;
       if (workerCode) {
         worker = await get(`SELECT * FROM workers WHERE code = ? AND status = 'active'`, [workerCode]);
-      } else if (workerName) {
+      }
+      if (!worker && workerName) {
         worker = await get(`SELECT * FROM workers WHERE name = ? AND status = 'active'`, [workerName]);
+      }
+      if (!worker && workerName) {
+        worker = await get(`SELECT * FROM workers WHERE name LIKE ? AND status = 'active'`, [`%${workerName}%`]);
       }
 
       if (!worker) {
@@ -303,7 +316,7 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
     const slots = [
       '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
       '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
-      '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
+      '15:00-16:00', '17:00-18:00', '18:00-19:00'
     ];
 
     const d = new Date(targetDate);
@@ -388,7 +401,6 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
     const logShift = body.shift || 'A';
 
     // SERVER-SIDE TIME-LOCK VALIDATION (+15 Minutes Grace Period Rule)
-    // Non-admin workers are strictly restricted to writing only during slot + 15 mins on current date
     if (req.user.role !== 'admin') {
       const todayStr = new Date().toISOString().split('T')[0];
       if (logDate !== todayStr) {
@@ -404,7 +416,7 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
 
       const slotStartMins = startH * 60 + startM;
       const slotEndMins = endH * 60 + endM;
-      const graceEndMins = slotEndMins + 15; // +15 minutes grace window
+      const graceEndMins = slotEndMins + 15;
 
       if (currentMins < slotStartMins) {
         return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} has not started yet.` });
