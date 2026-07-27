@@ -1,37 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, Calendar, Download, Filter, TrendingUp, Users, Package, Clock, CheckCircle2, FileText } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, LineChart, Line } from 'recharts';
+import { 
+  TrendingUp, Download, Calendar, Filter, BarChart2, Layers, AlertCircle, RefreshCcw
+} from 'lucide-react';
+import { 
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend 
+} from 'recharts';
 
-export default function HistoricalAnalytics({ workers, parts, machines }) {
+export default function HistoricalAnalytics({ parts, machines, workers, authFetch }) {
   const [period, setPeriod] = useState('daily'); // 'yearly' | 'monthly' | 'weekly' | 'daily' | 'hourly'
-  const [yearFilter, setYearFilter] = useState(new Date().getFullYear().toString());
-  const [monthFilter, setMonthFilter] = useState((new Date().getMonth() + 1).toString());
-  const [workerFilter, setWorkerFilter] = useState('');
-  const [partFilter, setPartFilter] = useState('');
-  const [machineFilter, setMachineFilter] = useState('');
+  const [selectedYear, setSelectedYear] = useState('2026');
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedWorker, setSelectedWorker] = useState('');
+  const [selectedPart, setSelectedPart] = useState('');
+  const [selectedMachine, setSelectedMachine] = useState('');
 
-  const [data, setData] = useState({
-    summary: {},
-    trendData: [],
-    downtimeLogs: []
-  });
+  const [analyticsData, setAnalyticsData] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const fetchHistoricalData = async () => {
+  const apiFetch = authFetch || fetch;
+
+  const fetchAnalytics = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
+      const queryParams = new URLSearchParams({
         period,
-        ...(yearFilter && { year: yearFilter }),
-        ...(monthFilter && { month: monthFilter }),
-        ...(workerFilter && { worker: workerFilter }),
-        ...(partFilter && { part: partFilter }),
-        ...(machineFilter && { machine: machineFilter })
+        ...(selectedYear && { year: selectedYear }),
+        ...(selectedMonth && { month: selectedMonth }),
+        ...(selectedWorker && { worker: selectedWorker }),
+        ...(selectedPart && { part: selectedPart }),
+        ...(selectedMachine && { machine: selectedMachine })
       });
 
-      const res = await fetch(`/api/analytics/historical?${params.toString()}`);
-      const json = await res.json();
-      setData(json);
+      const res = await apiFetch(`/api/analytics/historical?${queryParams.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAnalyticsData(data);
+      }
     } catch (err) {
       console.error('Error fetching historical analytics:', err);
     } finally {
@@ -40,242 +44,226 @@ export default function HistoricalAnalytics({ workers, parts, machines }) {
   };
 
   useEffect(() => {
-    fetchHistoricalData();
-  }, [period, yearFilter, monthFilter, workerFilter, partFilter, machineFilter]);
+    fetchAnalytics();
+  }, [period, selectedYear, selectedMonth, selectedWorker, selectedPart, selectedMachine]);
 
-  // Export to CSV function
+  // Export Evaluation CSV
   const handleExportCSV = () => {
-    if (!data.trendData || data.trendData.length === 0) return;
+    if (!analyticsData || !analyticsData.trendData) return;
 
-    const headers = ['Timeframe Label', 'Planned Qty Target', 'Produced Qty Actual', 'Efficiency %', 'Active Days'];
-    const rows = data.trendData.map(row => [
-      row.label,
-      row.total_planned,
-      row.total_produced,
-      `${row.efficiency_percent}%`,
-      row.active_days || 1
+    const headers = ['Time Interval', 'Planned Pcs', 'Produced Pcs', 'Efficiency %', 'Hours Recorded'];
+    const rows = analyticsData.trendData.map(row => [
+      `"${row.label}"`,
+      row.total_planned || 0,
+      row.total_produced || 0,
+      `${row.efficiency_percent || 0}%`,
+      row.total_hours_recorded || 0
     ]);
 
-    const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `production_evaluation_${period}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Production_Evaluation_${period}_${selectedYear}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const { summary, trendData, downtimeLogs } = data;
+  const summary = analyticsData?.summary || {};
+  const trendData = analyticsData?.trendData || [];
+  const downtimeLogs = analyticsData?.downtimeLogs || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Header & Evaluation Title */}
-      <div className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <BarChart3 color="var(--accent-cyan)" size={24} />
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Historical Evaluation & Analytics Center</h2>
+      
+      {/* Top Filter Header Bar */}
+      <div className="glass-panel" style={{ padding: '1.25rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <TrendingUp color="var(--accent-cyan)" size={22} /> Production Historical Evaluation & Analytics
+            </h2>
+            <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
+              Long-term multi-interval performance archive (Yearly, Monthly, Weekly, Daily, Hourly)
+            </p>
           </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            Long-term archive and multi-interval evaluation (Yearly, Monthly, Weekly, Daily, Hourly)
-          </p>
-        </div>
 
-        <button onClick={handleExportCSV} className="btn btn-success" disabled={!trendData || trendData.length === 0}>
-          <Download size={16} /> Export Evaluation Report (CSV)
-        </button>
-      </div>
-
-      {/* Filter Control Bar */}
-      <div className="glass-panel" style={{ padding: '1.2rem' }}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <Filter size={14} /> Historical Evaluation Timeframe & Filters
-        </div>
-
-        {/* Period Selector Buttons */}
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.2rem' }}>
-          {[
-            { id: 'yearly', label: 'Yearly' },
-            { id: 'monthly', label: 'Monthly' },
-            { id: 'weekly', label: 'Weekly' },
-            { id: 'daily', label: 'Daily' },
-            { id: 'hourly', label: 'Hourly' }
-          ].map(btn => (
-            <button
-              key={btn.id}
-              onClick={() => setPeriod(btn.id)}
-              className={`btn ${period === btn.id ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
-            >
-              {btn.label}
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button onClick={handleExportCSV} className="btn btn-secondary btn-sm">
+              <Download size={15} /> Export Report (CSV)
             </button>
-          ))}
+            <button onClick={fetchAnalytics} className="btn btn-primary btn-sm">
+              <RefreshCcw size={15} /> Refresh
+            </button>
+          </div>
         </div>
 
-        {/* Dropdown Filters */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+        {/* Filter Controls Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.85rem', background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '10px' }}>
+          
           <div className="form-group">
-            <label className="form-label">Select Year</label>
-            <select className="form-control" value={yearFilter} onChange={(e) => setYearFilter(e.target.value)}>
-              <option value="">All Years</option>
-              <option value="2026">2026</option>
-              <option value="2025">2025</option>
+            <label className="form-label">Evaluation Interval</label>
+            <select className="form-control" value={period} onChange={(e) => setPeriod(e.target.value)}>
+              <option value="yearly">Yearly Breakdown</option>
+              <option value="monthly">Monthly Breakdown</option>
+              <option value="weekly">Weekly Breakdown</option>
+              <option value="daily">Daily Breakdown</option>
+              <option value="hourly">Hourly Slot Profile</option>
             </select>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Select Month</label>
-            <select className="form-control" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}>
+            <label className="form-label">Year Filter</label>
+            <select className="form-control" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)}>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+              <option value="">All Years</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Month Filter</label>
+            <select className="form-control" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
               <option value="">All Months</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                <option key={m} value={m.toString()}>Month {m}</option>
-              ))}
+              <option value="1">January</option>
+              <option value="2">February</option>
+              <option value="3">March</option>
+              <option value="4">April</option>
+              <option value="5">May</option>
+              <option value="6">June</option>
+              <option value="7">July</option>
+              <option value="8">August</option>
             </select>
           </div>
 
           <div className="form-group">
             <label className="form-label">Worker Filter</label>
-            <select className="form-control" value={workerFilter} onChange={(e) => setWorkerFilter(e.target.value)}>
-              <option value="">All Workers</option>
+            <select className="form-control" value={selectedWorker} onChange={(e) => setSelectedWorker(e.target.value)}>
+              <option value="">All Workers ({workers.length})</option>
               {workers.map(w => (
-                <option key={w.id} value={w.name}>{w.name}</option>
+                <option key={w.id || w.code} value={w.name}>{w.name}</option>
               ))}
             </select>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Part Number Filter</label>
-            <select className="form-control" value={partFilter} onChange={(e) => setPartFilter(e.target.value)}>
-              <option value="">All Parts</option>
+            <label className="form-label">Part Number</label>
+            <select className="form-control" value={selectedPart} onChange={(e) => setSelectedPart(e.target.value)}>
+              <option value="">All Part Numbers</option>
               {parts.map(p => (
                 <option key={p.id} value={p.part_number}>{p.part_number}</option>
               ))}
             </select>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Machine Filter</label>
-            <select className="form-control" value={machineFilter} onChange={(e) => setMachineFilter(e.target.value)}>
-              <option value="">All Machines</option>
-              {machines.map(m => (
-                <option key={m.id} value={m.name}>{m.name}</option>
-              ))}
-            </select>
+        </div>
+      </div>
+
+      {/* Aggregate Metric Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-blue)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Period Planned Target</div>
+          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-blue)', marginTop: '0.2rem' }}>
+            {(summary.grand_planned || 0).toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
+          </div>
+        </div>
+
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-green)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Period Actual Output</div>
+          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-green)', marginTop: '0.2rem' }}>
+            {(summary.grand_produced || 0).toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
+          </div>
+        </div>
+
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Average Target Fulfillment</div>
+          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-cyan)', marginTop: '0.2rem' }}>
+            {summary.grand_efficiency || 0}%
+          </div>
+        </div>
+
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-yellow)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Days Evaluated</div>
+          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-yellow)', marginTop: '0.2rem' }}>
+            {summary.total_days_worked || 0} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Days</span>
           </div>
         </div>
       </div>
 
-      {/* KPI Evaluation Summary Scorecards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Target Planned Qty</div>
-          <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-blue)', marginTop: '0.2rem' }}>
-            {(summary?.grand_planned || 0).toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
-          </div>
-        </div>
-
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Produced Actual</div>
-          <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-green)', marginTop: '0.2rem' }}>
-            {(summary?.grand_produced || 0).toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
-          </div>
-        </div>
-
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Overall Efficiency %</div>
-          <div className="font-mono" style={{ 
-            fontSize: '1.6rem', 
-            fontWeight: 800, 
-            color: (summary?.grand_efficiency || 0) >= 100 ? 'var(--accent-green)' : (summary?.grand_efficiency || 0) >= 80 ? 'var(--accent-yellow)' : 'var(--accent-red)',
-            marginTop: '0.2rem' 
-          }}>
-            {summary?.grand_efficiency || 0}%
-          </div>
-        </div>
-
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Days & Active Workers</div>
-          <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 800, marginTop: '0.2rem' }}>
-            {summary?.total_days_worked || 0} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Days</span> &bull; {summary?.total_workers_active || 0} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Workers</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Visual Charts Component */}
+      {/* Main Historical Trend Visualizer Chart */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <TrendingUp color="var(--accent-cyan)" size={18} /> Production Fulfillment & Target Comparison Trend ({period.toUpperCase()})
-        </h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <BarChart2 size={18} color="var(--accent-cyan)" /> {period.toUpperCase()} Production Volume & Fulfillment Trend
+          </h3>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Showing {trendData.length} data points</span>
+        </div>
 
-        {trendData.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-            No evaluation data available for the selected filters.
-          </div>
-        ) : (
-          <div style={{ width: '100%', height: '350px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trendData} margin={{ top: 20, right: 30, left: 20, bottom: 25 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={12} />
-                <YAxis stroke="var(--text-muted)" fontSize={12} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid var(--border-color)', borderRadius: '8px', color: '#fff' }} 
-                />
-                <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                <Bar dataKey="total_planned" name="Planned Target Qty" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="total_produced" name="Produced Actual Qty" fill="#10b981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+        <div style={{ width: '100%', height: 350 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorPlanned" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorProduced" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.6}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={12} />
+              <YAxis stroke="var(--text-muted)" fontSize={12} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)', borderRadius: '8px' }}
+                itemStyle={{ fontSize: '0.85rem' }}
+              />
+              <Legend wrapperStyle={{ fontSize: '0.85rem', paddingTop: '10px' }} />
+              <Area type="monotone" dataKey="total_planned" name="Planned Target (Pcs)" stroke="#3b82f6" fillOpacity={1} fill="url(#colorPlanned)" />
+              <Area type="monotone" dataKey="total_produced" name="Actual Output (Pcs)" stroke="#10b981" fillOpacity={1} fill="url(#colorProduced)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
-      {/* Detailed Evaluation Table */}
+      {/* Historical Downtime Log Archive */}
       <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1.2rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FileText color="var(--accent-cyan)" size={18} /> Evaluation Data Table ({period.toUpperCase()} Breakdown)
+            <AlertCircle size={18} color="var(--accent-red)" /> Historical Downtime & Remark Log Archive
           </h3>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{trendData.length} Intervals Recorded</span>
+          <span className="badge badge-red">{downtimeLogs.length} Logged Incidents</span>
         </div>
 
         <div className="prod-table-container" style={{ border: 'none' }}>
           <table className="prod-table">
             <thead>
               <tr>
-                <th>Interval / Label</th>
-                <th>Planned Target Qty</th>
-                <th>Produced Actual Qty</th>
-                <th>Variance (Pcs)</th>
-                <th>Target Fulfillment %</th>
-                <th>Active Production Days</th>
+                <th>Date</th>
+                <th>Time Slot</th>
+                <th>Worker</th>
+                <th>Part Number</th>
+                <th>Machine</th>
+                <th>Variance (Loss)</th>
+                <th>Logged Downtime Remark</th>
               </tr>
             </thead>
             <tbody>
-              {trendData.map((row, idx) => {
-                const diff = row.total_produced - row.total_planned;
-                const eff = row.efficiency_percent;
-
+              {downtimeLogs.map((log, idx) => {
+                const loss = log.planned_qty - log.produced_qty;
                 return (
                   <tr key={idx}>
-                    <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>
-                      {row.label}
+                    <td className="font-mono" style={{ fontSize: '0.85rem' }}>{log.date}</td>
+                    <td className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>{log.time_slot}</td>
+                    <td>{log.worker_name}</td>
+                    <td className="font-mono">{log.part_number}</td>
+                    <td>{log.machine_name}</td>
+                    <td className="font-mono" style={{ color: 'var(--accent-red)', fontWeight: 700 }}>
+                      -{loss > 0 ? loss : 0} Pcs
                     </td>
-                    <td className="font-mono">{row.total_planned?.toLocaleString()}</td>
-                    <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-green)' }}>
-                      {row.total_produced?.toLocaleString()}
-                    </td>
-                    <td className="font-mono" style={{ color: diff >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                      {diff > 0 ? `+${diff}` : diff}
-                    </td>
-                    <td>
-                      <span className={`badge ${eff >= 100 ? 'badge-green' : eff >= 80 ? 'badge-yellow' : 'badge-red'}`}>
-                        {eff}%
-                      </span>
-                    </td>
-                    <td className="font-mono">{row.active_days || 1} Days</td>
+                    <td style={{ color: 'var(--accent-red)' }}>{log.remarks}</td>
                   </tr>
                 );
               })}
@@ -283,6 +271,7 @@ export default function HistoricalAnalytics({ workers, parts, machines }) {
           </table>
         </div>
       </div>
+
     </div>
   );
 }

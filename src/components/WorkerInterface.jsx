@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, CheckCircle, Save, User, Cpu, ShieldCheck, FileSpreadsheet, Lock, Unlock, AlertCircle } from 'lucide-react';
+import { Clock, CheckCircle, Save, User, Cpu, ShieldCheck, FileSpreadsheet, Lock, Unlock, AlertTriangle } from 'lucide-react';
 
-export default function WorkerInterface({ currentUser, workers, parts, machines, lastWsMessage }) {
+export default function WorkerInterface({ currentUser, workers, parts, machines, lastWsMessage, authFetch }) {
   const [selectedWorker, setSelectedWorker] = useState(currentUser?.name || (workers.length > 0 ? workers[0].name : 'Lavkush'));
   const [selectedMachine, setSelectedMachine] = useState(machines.length > 0 ? machines[0].name : 'M/C 392');
   const [selectedPart, setSelectedPart] = useState(parts.length > 0 ? parts[0].part_number : 'CCW2410');
@@ -9,15 +9,16 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [assignmentInfo, setAssignmentInfo] = useState(null);
 
-  // Time Lock & Demo Time Simulation
-  const [simulatedTime, setSimulatedTime] = useState(''); // Empty = real current time, or HH:MM
-  const [bypassTimeLock, setBypassTimeLock] = useState(false); // Admin / Test bypass toggle
+  // Time Lock Simulation for Admin test mode
+  const [simulatedTime, setSimulatedTime] = useState('');
+  const [bypassTimeLock, setBypassTimeLock] = useState(false);
 
   // Hourly logs state for the 12 time slots
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingSlot, setSavingSlot] = useState(null);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   const defaultSlots = [
     '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
@@ -25,20 +26,23 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
   ];
 
-  // Check if a time slot is editable (+15 minutes rule)
+  // Helper for authenticated requests (fallback to standard fetch if authFetch not provided)
+  const apiFetch = authFetch || fetch;
+
+  // Check client-side slot time status (+15 minutes grace period)
   const getSlotTimeStatus = (timeSlotStr, logDateStr) => {
-    if (bypassTimeLock || currentUser?.role === 'admin') {
-      return { editable: true, reason: 'Admin Override' };
+    if (currentUser?.role === 'admin' && bypassTimeLock) {
+      return { editable: true, reason: 'Admin Bypass Active' };
     }
 
     const todayStr = new Date().toISOString().split('T')[0];
-    if (logDateStr !== todayStr) {
+    if (logDateStr !== todayStr && currentUser?.role !== 'admin') {
       return { editable: false, reason: 'Date Locked (Only today allowed)' };
     }
 
     // Determine current time in minutes from midnight
     let currentMins;
-    if (simulatedTime) {
+    if (simulatedTime && currentUser?.role === 'admin') {
       const [sh, sm] = simulatedTime.split(':').map(Number);
       currentMins = sh * 60 + sm;
     } else {
@@ -46,14 +50,13 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
       currentMins = now.getHours() * 60 + now.getMinutes();
     }
 
-    // Parse time slot, e.g., "09:00-10:00"
     const [startStr, endStr] = timeSlotStr.split('-');
     const [startH, startM] = startStr.split(':').map(Number);
     const [endH, endM] = endStr.split(':').map(Number);
 
     const slotStartMins = startH * 60 + startM;
     const slotEndMins = endH * 60 + endM;
-    const graceEndMins = slotEndMins + 15; // +15 minutes grace period
+    const graceEndMins = slotEndMins + 15; // +15 minutes grace window
 
     if (currentMins < slotStartMins) {
       return { editable: false, reason: `Locked (Starts at ${startStr})` };
@@ -72,42 +75,46 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     setLoading(true);
     try {
       // 1. Fetch assignment details for metadata
-      const assignRes = await fetch(`/api/assignments?date=${date}&shift=${shift}`);
-      const assignments = await assignRes.json();
-      const currentAssign = assignments.find(
-        a => a.machine_name === selectedMachine || a.worker_name === selectedWorker
-      );
-      if (currentAssign) {
-        setAssignmentInfo(currentAssign);
-        setSelectedPart(currentAssign.part_number);
+      const assignRes = await apiFetch(`/api/assignments?date=${date}&shift=${shift}`);
+      if (assignRes.ok) {
+        const assignments = await assignRes.json();
+        const currentAssign = assignments.find(
+          a => a.machine_name === selectedMachine || a.worker_name === selectedWorker
+        );
+        if (currentAssign) {
+          setAssignmentInfo(currentAssign);
+          setSelectedPart(currentAssign.part_number);
+        }
       }
 
       // 2. Fetch logs for this shift/part/machine
-      const logsRes = await fetch(
+      const logsRes = await apiFetch(
         `/api/hourly-logs?date=${date}&shift=${shift}&machine_name=${selectedMachine}&part_number=${selectedPart}`
       );
-      const existingLogs = await logsRes.json();
+      if (logsRes.ok) {
+        const existingLogs = await logsRes.json();
 
-      // Merge with default 12 slots
-      const mergedSlots = defaultSlots.map(slot => {
-        const found = existingLogs.find(l => l.time_slot === slot);
-        const plannedFromAssign = currentAssign ? currentAssign.planned_hourly_qty : 840;
-        
-        return found ? { ...found } : {
-          time_slot: slot,
-          planned_qty: plannedFromAssign,
-          produced_qty: 0,
-          remarks: '',
-          supervisor_approved: 0,
-          date,
-          shift,
-          machine_name: selectedMachine,
-          part_number: selectedPart,
-          worker_name: selectedWorker
-        };
-      });
+        // Merge with default 12 slots
+        const mergedSlots = defaultSlots.map(slot => {
+          const found = existingLogs.find(l => l.time_slot === slot);
+          const plannedFromAssign = assignmentInfo ? assignmentInfo.planned_hourly_qty : 840;
+          
+          return found ? { ...found } : {
+            time_slot: slot,
+            planned_qty: plannedFromAssign,
+            produced_qty: 0,
+            remarks: '',
+            supervisor_approved: 0,
+            date,
+            shift,
+            machine_name: selectedMachine,
+            part_number: selectedPart,
+            worker_name: selectedWorker
+          };
+        });
 
-      setLogs(mergedSlots);
+        setLogs(mergedSlots);
+      }
     } catch (err) {
       console.error('Error fetching logs:', err);
     } finally {
@@ -139,19 +146,23 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     const status = getSlotTimeStatus(slotData.time_slot, date);
 
     if (!status.editable) {
-      alert(`Cannot save entry for ${slotData.time_slot}: ${status.reason}`);
+      setErrorMsg(`Cannot save entry: ${status.reason}`);
+      setTimeout(() => setErrorMsg(''), 4000);
       return;
     }
 
     setSavingSlot(slotIndex);
     setSaveSuccessMsg('');
+    setErrorMsg('');
 
     try {
-      const res = await fetch('/api/hourly-logs', {
+      const res = await apiFetch('/api/hourly-logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...slotData,
+          planned_qty: parseInt(slotData.planned_qty) || 0,
+          produced_qty: Math.max(0, parseInt(slotData.produced_qty) || 0),
           date,
           shift,
           machine_name: selectedMachine,
@@ -160,12 +171,16 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
         })
       });
 
-      if (res.ok) {
-        setSaveSuccessMsg(`Entry for ${slotData.time_slot} saved successfully!`);
-        setTimeout(() => setSaveSuccessMsg(''), 2500);
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(resData.error || 'Failed to save entry');
       }
+
+      setSaveSuccessMsg(`Entry for ${slotData.time_slot} saved & authenticated!`);
+      setTimeout(() => setSaveSuccessMsg(''), 2500);
     } catch (err) {
-      console.error('Error saving slot:', err);
+      setErrorMsg(err.message);
+      setTimeout(() => setErrorMsg(''), 4000);
     } finally {
       setSavingSlot(null);
     }
@@ -187,36 +202,32 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
               <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Hourly Production Verification Sheet</h2>
             </div>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Strict Time Window Protection: Workers can edit quantity during slot + 15 min grace period only
+              Server Authenticated Entry: Edits allowed only during slot + 15 min grace period
             </p>
           </div>
 
-          {/* Time Simulation / Bypass Banner for Testing */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(0,0,0,0.25)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
-            <Clock size={14} color="var(--accent-yellow)" />
-            <span>Simulate Time:</span>
-            <input 
-              type="time" 
-              className="table-input font-mono" 
-              style={{ width: '100px', padding: '0.2rem 0.4rem', fontSize: '0.8rem' }}
-              value={simulatedTime} 
-              onChange={(e) => setSimulatedTime(e.target.value)}
-              title="Set simulated clock time to test the +15 min time window rule"
-            />
-            {simulatedTime && (
-              <button onClick={() => setSimulatedTime('')} className="btn btn-secondary btn-sm" style={{ padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>
-                Reset
-              </button>
-            )}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', marginLeft: '0.5rem' }}>
+          {/* Admin Debug Simulation Controls (Only rendered if logged-in user is Admin) */}
+          {currentUser?.role === 'admin' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(0,0,0,0.25)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
+              <Clock size={14} color="var(--accent-yellow)" />
+              <span>Admin Debug Clock:</span>
               <input 
-                type="checkbox" 
-                checked={bypassTimeLock} 
-                onChange={(e) => setBypassTimeLock(e.target.checked)} 
+                type="time" 
+                className="table-input font-mono" 
+                style={{ width: '100px', padding: '0.2rem 0.4rem', fontSize: '0.8rem' }}
+                value={simulatedTime} 
+                onChange={(e) => setSimulatedTime(e.target.value)}
               />
-              <span style={{ color: 'var(--text-muted)' }}>Bypass Rule</span>
-            </label>
-          </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={bypassTimeLock} 
+                  onChange={(e) => setBypassTimeLock(e.target.checked)} 
+                />
+                <span style={{ color: 'var(--text-muted)' }}>Bypass</span>
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Form Selection Controls */}
@@ -225,7 +236,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             <label className="form-label"><User size={13} style={{ marginRight: '4px' }} /> Worker Name</label>
             <select className="form-control" value={selectedWorker} onChange={(e) => setSelectedWorker(e.target.value)}>
               {workers.map(w => (
-                <option key={w.id} value={w.name}>{w.name}</option>
+                <option key={w.id || w.code} value={w.name}>{w.name}</option>
               ))}
             </select>
           </div>
@@ -268,11 +279,18 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
         </div>
       </div>
 
-      {/* Success Banner */}
+      {/* Success & Error Banners */}
       {saveSuccessMsg && (
         <div style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)', padding: '0.85rem 1.2rem', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600 }}>
           <CheckCircle size={20} />
           {saveSuccessMsg}
+        </div>
+      )}
+
+      {errorMsg && (
+        <div style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', padding: '0.85rem 1.2rem', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600 }}>
+          <AlertTriangle size={20} />
+          {errorMsg}
         </div>
       )}
 
@@ -312,7 +330,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             <Clock size={18} color="var(--accent-cyan)" /> Hourly Production Log Entries
           </h3>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Rule: Edits allowed only within Slot Time + 15 mins
+            Server Enforcement: Slot Time + 15 mins
           </span>
         </div>
 
@@ -350,7 +368,6 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
                       {log.time_slot}
                     </td>
 
-                    {/* Lock Status Column */}
                     <td>
                       {timeStatus.editable ? (
                         <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
@@ -381,6 +398,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
                         value={log.produced_qty}
                         onChange={(e) => handleInputChange(index, 'produced_qty', e.target.value)}
                         placeholder="0"
+                        min="0"
                         disabled={!timeStatus.editable}
                         style={{ 
                           borderColor: produced > 0 ? 'var(--accent-green)' : 'var(--border-color)',

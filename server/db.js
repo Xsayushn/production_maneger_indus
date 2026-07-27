@@ -2,6 +2,7 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,12 +49,24 @@ export const get = (sql, params = []) => {
 export const initDb = async () => {
   await run(`PRAGMA foreign_keys = ON;`);
 
+  // Admin users table
+  await run(`
+    CREATE TABLE IF NOT EXISTS admins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'admin',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Workers table
   await run(`
     CREATE TABLE IF NOT EXISTS workers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       code TEXT UNIQUE NOT NULL,
+      password_hash TEXT,
       department TEXT DEFAULT 'Production Line',
       shift TEXT DEFAULT 'A',
       role TEXT DEFAULT 'worker',
@@ -61,7 +74,11 @@ export const initDb = async () => {
     )
   `);
 
-  // Migration for existing tables: Add columns if missing
+  // Migrations for existing database: Add password_hash column if missing
+  try {
+    await run(`ALTER TABLE workers ADD COLUMN password_hash TEXT`);
+  } catch (e) { /* Column already exists */ }
+
   try {
     await run(`ALTER TABLE workers ADD COLUMN department TEXT DEFAULT 'Production Line'`);
   } catch (e) { /* Column already exists */ }
@@ -136,6 +153,15 @@ export const initDb = async () => {
   await run(`CREATE INDEX IF NOT EXISTS idx_logs_eval ON hourly_logs(year, month, week_number, date);`);
   await run(`CREATE INDEX IF NOT EXISTS idx_logs_worker ON hourly_logs(worker_name);`);
   await run(`CREATE INDEX IF NOT EXISTS idx_logs_part ON hourly_logs(part_number);`);
+
+  // Seed default admin account securely if none exists
+  const existingAdmin = await get(`SELECT id FROM admins WHERE username = 'admin'`);
+  if (!existingAdmin) {
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const hash = await bcrypt.hash(adminPassword, 10);
+    await run(`INSERT INTO admins (username, password_hash, role) VALUES ('admin', ?, 'admin')`, [hash]);
+    console.log('Default admin account initialized securely.');
+  }
 
   console.log('Database initialized successfully.');
 };

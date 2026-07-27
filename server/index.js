@@ -2,10 +2,14 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
+import helmet from 'helmet';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
 import { fileURLToPath } from 'url';
 import { initDb, query, run, get } from './db.js';
+import { generateToken, verifyToken, authenticateToken, requireAdmin } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,10 +18,35 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-app.use(cors());
+// 1. Security Headers via Helmet
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Disabled CSP for inline scripts if any in Vite bundle
+    crossOriginEmbedderPolicy: false
+  })
+);
+
+// 2. Restricted CORS
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:3000', 'http://localhost:5000'];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or same-origin curl)
+      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'production') {
+        return callback(null, true);
+      }
+      return callback(new Error('CORS policy violation: Origin not allowed.'));
+    },
+    credentials: true
+  })
+);
+
 app.use(express.json());
 
-// Broadcast function to notify all connected WebSocket clients in real-time
+// Broadcast function to notify connected, authenticated WebSocket clients
 const broadcast = (data) => {
   const message = JSON.stringify(data);
   wss.clients.forEach((client) => {
@@ -27,23 +56,106 @@ const broadcast = (data) => {
   });
 };
 
-wss.on('connection', (ws) => {
-  console.log('Client connected to real-time WebSocket');
-  ws.send(JSON.stringify({ type: 'CONNECTED', message: 'Realtime production stream connected' }));
+// WebSocket Authentication on Handshake
+wss.on('connection', (ws, req) => {
+  const urlParams = new URLSearchParams(req.url.split('?')[1]);
+  const token = urlParams.get('token');
+
+  if (!token) {
+    ws.close(4001, 'Unauthorized: Token required');
+    return;
+  }
+
+  const user = verifyToken(token);
+  if (!user) {
+    ws.close(4002, 'Unauthorized: Invalid token');
+    return;
+  }
+
+  ws.user = user;
+  ws.send(JSON.stringify({ type: 'CONNECTED', message: `Authenticated connection active for ${user.name}` }));
 });
 
 // Initialize DB schema on start
 await initDb();
 
 // ----------------------------------------------------
-// REST API ENDPOINTS
+// AUTHENTICATION ENDPOINTS
 // ----------------------------------------------------
 
-// 1. Get Workers
-app.get('/api/workers', async (req, res) => {
+// Server-side Authentication (Admin & Worker Login)
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { role, username, password, workerCode, workerName } = req.body;
+
+    if (role === 'admin') {
+      const admin = await get(`SELECT * FROM admins WHERE username = ?`, [username || 'admin']);
+      if (!admin) {
+        return res.status(401).json({ error: 'Invalid admin username or password.' });
+      }
+
+      const isMatch = await bcrypt.compare(password || '', admin.password_hash);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid admin username or password.' });
+      }
+
+      const token = generateToken({
+        id: admin.id,
+        name: 'System Admin',
+        code: 'ADM-001',
+        role: 'admin'
+      });
+
+      return res.json({
+        token,
+        user: { id: admin.id, name: 'System Admin', code: 'ADM-001', role: 'admin' }
+      });
+    } else {
+      // Worker authentication by Employee Code or Name
+      let worker;
+      if (workerCode) {
+        worker = await get(`SELECT * FROM workers WHERE code = ? AND status = 'active'`, [workerCode]);
+      } else if (workerName) {
+        worker = await get(`SELECT * FROM workers WHERE name = ? AND status = 'active'`, [workerName]);
+      }
+
+      if (!worker) {
+        return res.status(401).json({ error: 'Worker not found or inactive. Please check your Employee Code.' });
+      }
+
+      const token = generateToken({
+        id: worker.id,
+        name: worker.name,
+        code: worker.code,
+        role: 'worker',
+        department: worker.department,
+        shift: worker.shift
+      });
+
+      return res.json({
+        token,
+        user: { id: worker.id, name: worker.name, code: worker.code, role: 'worker', department: worker.department, shift: worker.shift }
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Current User Profile (Token Check)
+app.get('/api/auth/me', authenticateToken, (req, res) => {
+  res.json({ user: req.user });
+});
+
+// ----------------------------------------------------
+// PROTECTED API ENDPOINTS
+// ----------------------------------------------------
+
+// 1. Get Workers (Protected by Auth)
+app.get('/api/workers', authenticateToken, async (req, res) => {
   try {
     const { search, department, status, limit } = req.query;
-    let sql = `SELECT * FROM workers WHERE 1=1`;
+    let sql = `SELECT id, name, code, department, shift, role, status FROM workers WHERE 1=1`;
     let params = [];
 
     if (search) {
@@ -51,19 +163,16 @@ app.get('/api/workers', async (req, res) => {
       const term = `%${search}%`;
       params.push(term, term, term);
     }
-
     if (department) {
       sql += ` AND department = ?`;
       params.push(department);
     }
-
     if (status) {
       sql += ` AND status = ?`;
       params.push(status);
     }
 
     sql += ` ORDER BY name ASC`;
-
     if (limit) {
       sql += ` LIMIT ?`;
       params.push(parseInt(limit));
@@ -76,36 +185,44 @@ app.get('/api/workers', async (req, res) => {
   }
 });
 
-// Create New Worker
-app.post('/api/workers', async (req, res) => {
+// Create Worker (Protected by Admin Role)
+app.post('/api/workers', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { name, code, department, shift } = req.body;
-    const workerCode = code || `WRK-${Math.floor(1000 + Math.random() * 9000)}`;
+    const schema = z.object({
+      name: z.string().min(2),
+      code: z.string().min(2).optional(),
+      department: z.string().optional(),
+      shift: z.string().optional()
+    });
+
+    const parsed = schema.parse(req.body);
+    const workerCode = parsed.code || `WRK-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const result = await run(
       `INSERT INTO workers (name, code, department, shift, role, status) VALUES (?, ?, ?, ?, 'worker', 'active')`,
-      [name, workerCode, department || 'Production Line', shift || 'A']
+      [parsed.name, workerCode, parsed.department || 'Production Line', parsed.shift || 'A']
     );
-    res.json({ id: result.id, name, code: workerCode, department, shift, status: 'active' });
+    res.json({ id: result.id, name: parsed.name, code: workerCode, department: parsed.department, shift: parsed.shift, status: 'active' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// Update Worker Status
-app.put('/api/workers/:id', async (req, res) => {
+// Update Worker Status (Protected by Admin Role)
+app.put('/api/workers/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, department, shift } = req.body;
     await run(`UPDATE workers SET status = COALESCE(?, status), department = COALESCE(?, department), shift = COALESCE(?, shift) WHERE id = ?`, [status, department, shift, id]);
-    const updated = await get(`SELECT * FROM workers WHERE id = ?`, [id]);
+    const updated = await get(`SELECT id, name, code, department, shift, role, status FROM workers WHERE id = ?`, [id]);
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Get Part Numbers
-app.get('/api/parts', async (req, res) => {
+// 2. Get Part Numbers (Protected by Auth)
+app.get('/api/parts', authenticateToken, async (req, res) => {
   try {
     const parts = await query(`SELECT * FROM part_numbers ORDER BY part_number ASC`);
     res.json(parts);
@@ -114,13 +231,13 @@ app.get('/api/parts', async (req, res) => {
   }
 });
 
-// Create Part Number
-app.post('/api/parts', async (req, res) => {
+// Create Part Number (Protected by Admin Role)
+app.post('/api/parts', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { part_number, description, tube_spec, default_hourly_target } = req.body;
     const result = await run(
       `INSERT INTO part_numbers (part_number, description, tube_spec, default_hourly_target) VALUES (?, ?, ?, ?)`,
-      [part_number, description || '', tube_spec || '', default_hourly_target || 840]
+      [part_number, description || '', tube_spec || '', Math.max(1, parseInt(default_hourly_target) || 840)]
     );
     res.json({ id: result.id, part_number, description, tube_spec, default_hourly_target });
   } catch (err) {
@@ -128,8 +245,8 @@ app.post('/api/parts', async (req, res) => {
   }
 });
 
-// 3. Get Machines
-app.get('/api/machines', async (req, res) => {
+// 3. Get Machines (Protected by Auth)
+app.get('/api/machines', authenticateToken, async (req, res) => {
   try {
     const machines = await query(`SELECT * FROM machines ORDER BY name ASC`);
     res.json(machines);
@@ -138,8 +255,8 @@ app.get('/api/machines', async (req, res) => {
   }
 });
 
-// 4. Get Assignments (Admin Targets)
-app.get('/api/assignments', async (req, res) => {
+// 4. Get Assignments (Protected by Auth)
+app.get('/api/assignments', authenticateToken, async (req, res) => {
   try {
     const { date, shift } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
@@ -159,17 +276,28 @@ app.get('/api/assignments', async (req, res) => {
   }
 });
 
-// Create or Update Target Assignment (Admin action)
-app.post('/api/assignments', async (req, res) => {
+// Create or Update Target Assignment (Protected by Admin Role)
+app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number } = req.body;
-    const targetDate = date || new Date().toISOString().split('T')[0];
-    const targetShift = shift || 'A';
+    const schema = z.object({
+      date: z.string(),
+      shift: z.string(),
+      worker_name: z.string(),
+      part_number: z.string(),
+      machine_name: z.string(),
+      planned_hourly_qty: z.number().min(1),
+      tube_spec: z.string().optional(),
+      job_number: z.string().optional()
+    });
+
+    const body = schema.parse(req.body);
+    const targetDate = body.date || new Date().toISOString().split('T')[0];
+    const targetShift = body.shift || 'A';
 
     await run(
       `INSERT OR REPLACE INTO assignments (date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [targetDate, targetShift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec || '', job_number || '']
+      [targetDate, targetShift, body.worker_name, body.part_number, body.machine_name, body.planned_hourly_qty, body.tube_spec || '', body.job_number || '']
     );
 
     const slots = [
@@ -190,24 +318,24 @@ app.post('/api/assignments', async (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '')
          ON CONFLICT(date, shift, time_slot, machine_name, part_number) 
          DO UPDATE SET planned_qty = ?, worker_name = ?`,
-        [targetDate, yr, mo, wk, targetShift, slot, part_number, machine_name, worker_name, planned_hourly_qty, planned_hourly_qty, worker_name]
+        [targetDate, yr, mo, wk, targetShift, slot, body.part_number, body.machine_name, body.worker_name, body.planned_hourly_qty, body.planned_hourly_qty, body.worker_name]
       );
     }
 
     const payload = {
       type: 'TARGET_UPDATED',
-      data: { date: targetDate, shift: targetShift, worker_name, part_number, machine_name, planned_hourly_qty }
+      data: { date: targetDate, shift: targetShift, worker_name: body.worker_name, part_number: body.part_number, machine_name: body.machine_name, planned_hourly_qty: body.planned_hourly_qty }
     };
     broadcast(payload);
 
     res.json({ message: 'Target assigned successfully', data: payload.data });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// 5. Get Hourly Logs
-app.get('/api/hourly-logs', async (req, res) => {
+// 5. Get Hourly Logs (Protected by Auth)
+app.get('/api/hourly-logs', authenticateToken, async (req, res) => {
   try {
     const { date, part_number, machine_name, worker_name, shift } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
@@ -240,12 +368,51 @@ app.get('/api/hourly-logs', async (req, res) => {
   }
 });
 
-// Post / Update Hourly Entry (Worker action)
-app.post('/api/hourly-logs', async (req, res) => {
+// SERVER-SIDE TIME LOCK ENFORCEMENT & ENTRY SAVING (Protected by Auth)
+app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
   try {
-    const { date, shift, time_slot, part_number, machine_name, worker_name, planned_qty, produced_qty, remarks } = req.body;
-    const logDate = date || new Date().toISOString().split('T')[0];
-    const logShift = shift || 'A';
+    const schema = z.object({
+      date: z.string(),
+      shift: z.string().optional(),
+      time_slot: z.string(),
+      part_number: z.string(),
+      machine_name: z.string(),
+      worker_name: z.string(),
+      planned_qty: z.number().nonnegative().optional(),
+      produced_qty: z.number().nonnegative(),
+      remarks: z.string().optional()
+    });
+
+    const body = schema.parse(req.body);
+    const logDate = body.date || new Date().toISOString().split('T')[0];
+    const logShift = body.shift || 'A';
+
+    // SERVER-SIDE TIME-LOCK VALIDATION (+15 Minutes Grace Period Rule)
+    // Non-admin workers are strictly restricted to writing only during slot + 15 mins on current date
+    if (req.user.role !== 'admin') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (logDate !== todayStr) {
+        return res.status(403).json({ error: 'Security Violation: Production records can only be updated for today.' });
+      }
+
+      const now = new Date();
+      const currentMins = now.getHours() * 60 + now.getMinutes();
+
+      const [startStr, endStr] = body.time_slot.split('-');
+      const [startH, startM] = startStr.split(':').map(Number);
+      const [endH, endM] = endStr.split(':').map(Number);
+
+      const slotStartMins = startH * 60 + startM;
+      const slotEndMins = endH * 60 + endM;
+      const graceEndMins = slotEndMins + 15; // +15 minutes grace window
+
+      if (currentMins < slotStartMins) {
+        return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} has not started yet.` });
+      }
+      if (currentMins > graceEndMins) {
+        return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} is closed. Edits allowed only within slot time + 15 min grace period.` });
+      }
+    }
 
     const d = new Date(logDate);
     const yr = d.getFullYear();
@@ -264,12 +431,12 @@ app.post('/api/hourly-logs', async (req, res) => {
          worker_name = ?,
          planned_qty = COALESCE(NULLIF(?, 0), planned_qty),
          updated_at = CURRENT_TIMESTAMP`,
-      [logDate, yr, mo, wk, logShift, time_slot, part_number, machine_name, worker_name, planned_qty || 0, produced_qty || 0, remarks || '', produced_qty || 0, remarks || '', worker_name, planned_qty || 0]
+      [logDate, yr, mo, wk, logShift, body.time_slot, body.part_number, body.machine_name, body.worker_name, body.planned_qty || 0, body.produced_qty, body.remarks || '', body.produced_qty, body.remarks || '', body.worker_name, body.planned_qty || 0]
     );
 
     const updatedLog = await get(
       `SELECT * FROM hourly_logs WHERE date = ? AND shift = ? AND time_slot = ? AND machine_name = ? AND part_number = ?`,
-      [logDate, logShift, time_slot, machine_name, part_number]
+      [logDate, logShift, body.time_slot, body.machine_name, body.part_number]
     );
 
     broadcast({
@@ -279,12 +446,12 @@ app.post('/api/hourly-logs', async (req, res) => {
 
     res.json(updatedLog);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-// Toggle Supervisor Signoff
-app.post('/api/hourly-logs/approve', async (req, res) => {
+// Toggle Supervisor Signoff (Protected by Admin Role)
+app.post('/api/hourly-logs/approve', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id, supervisor_approved } = req.body;
     await run(`UPDATE hourly_logs SET supervisor_approved = ? WHERE id = ?`, [supervisor_approved ? 1 : 0, id]);
@@ -297,8 +464,8 @@ app.post('/api/hourly-logs/approve', async (req, res) => {
   }
 });
 
-// Historical Analytics Endpoint
-app.get('/api/analytics/historical', async (req, res) => {
+// Historical Analytics Endpoint (Protected by Auth & Admin Role)
+app.get('/api/analytics/historical', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { period, year, month, week, startDate, endDate, worker, part, machine } = req.query;
 
@@ -403,7 +570,7 @@ app.get('/api/analytics/historical', async (req, res) => {
 });
 
 // ----------------------------------------------------
-// PRODUCTION STATIC FILE SERVING FOR CLOUD DEPLOYMENT
+// PRODUCTION STATIC FILE SERVING
 // ----------------------------------------------------
 const distPath = path.join(__dirname, '../dist');
 if (fs.existsSync(distPath)) {

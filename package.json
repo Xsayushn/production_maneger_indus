@@ -10,18 +10,22 @@
     "build": "vite build",
     "preview": "vite preview",
     "seed": "node server/seed.js",
-    "start": "node server/seed.js && node server/index.js",
+    "start": "node server/index.js",
     "postinstall": "npm run build"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.395.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.12.7",
     "sqlite3": "^5.1.7",
-    "ws": "^8.17.0"
+    "ws": "^8.17.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

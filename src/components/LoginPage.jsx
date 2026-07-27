@@ -6,10 +6,11 @@ export default function LoginPage({ workers, onLogin }) {
   const [adminUsername, setAdminUsername] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('admin123');
   
-  // Searchable worker state for 100+ worker roster
+  // Searchable worker state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWorkerObj, setSelectedWorkerObj] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Filter workers dynamically as user types
   const filteredWorkers = useMemo(() => {
@@ -20,32 +21,63 @@ export default function LoginPage({ workers, onLogin }) {
     ).slice(0, 25);
   }, [searchQuery, workers]);
 
-  const handleAdminSubmit = (e) => {
+  const handleAdminSubmit = async (e) => {
     e.preventDefault();
-    if (adminUsername === 'admin' && adminPassword === 'admin123') {
-      onLogin({
-        role: 'admin',
-        name: 'System Admin',
-        code: 'ADM-001'
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: 'admin',
+          username: adminUsername,
+          password: adminPassword
+        })
       });
-    } else {
-      setError('Invalid admin credentials. Use admin / admin123');
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Admin login failed');
+
+      onLogin(data.user, data.token);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleWorkerSubmit = (e) => {
+  const handleWorkerSubmit = async (e) => {
     e.preventDefault();
-    const targetWorker = selectedWorkerObj || (filteredWorkers.length > 0 ? filteredWorkers[0] : { name: searchQuery, code: 'WRK-1001' });
-    if (!targetWorker || !targetWorker.name) {
-      setError('Please select or enter a valid Worker Name / Employee Code');
-      return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const targetWorker = selectedWorkerObj || (filteredWorkers.length > 0 ? filteredWorkers[0] : null);
+      if (!targetWorker && !searchQuery.trim()) {
+        throw new Error('Please select or enter a valid Worker Name / Employee Code');
+      }
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: 'worker',
+          workerCode: targetWorker ? targetWorker.code : searchQuery,
+          workerName: targetWorker ? targetWorker.name : searchQuery
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Worker login failed');
+
+      onLogin(data.user, data.token);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-    onLogin({
-      role: 'worker',
-      name: targetWorker.name,
-      code: targetWorker.code || 'WRK-1001',
-      department: targetWorker.department || 'Production'
-    });
   };
 
   return (
@@ -78,7 +110,7 @@ export default function LoginPage({ workers, onLogin }) {
             INDUS PRODUCTION MANAGER
           </h1>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-            Enterprise Shop-Floor Portal (100+ Worker Roster)
+            Secure Server-Authenticated Portal
           </p>
         </div>
 
@@ -127,7 +159,7 @@ export default function LoginPage({ workers, onLogin }) {
           </div>
         )}
 
-        {/* Worker Login Form with Instant Search */}
+        {/* Worker Login Form */}
         {role === 'worker' ? (
           <form onSubmit={handleWorkerSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
             <div className="form-group">
@@ -184,8 +216,8 @@ export default function LoginPage({ workers, onLogin }) {
               })}
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }}>
-              Access Shop-Floor Verification <ArrowRight size={18} />
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }} disabled={loading}>
+              {loading ? 'Authenticating...' : 'Access Shop-Floor Verification'} <ArrowRight size={18} />
             </button>
           </form>
         ) : (
@@ -213,14 +245,14 @@ export default function LoginPage({ workers, onLogin }) {
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }}>
-              <Lock size={18} /> Sign In to Admin Center
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }} disabled={loading}>
+              <Lock size={18} /> {loading ? 'Verifying...' : 'Sign In to Admin Center'}
             </button>
           </form>
         )}
 
         <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Indus Production System &bull; 100+ Enterprise Worker Roster Connected
+          Indus Production System &bull; JWT Authentication Active
         </div>
       </div>
     </div>

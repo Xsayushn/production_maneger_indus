@@ -5,7 +5,12 @@ import WorkerInterface from './components/WorkerInterface.jsx';
 import LoginPage from './components/LoginPage.jsx';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(null); // null | { role: 'admin'|'worker', name: string, code: string }
+  const [currentUser, setCurrentUser] = useState(() => {
+    const savedUser = localStorage.getItem('indus_user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('indus_token') || '');
+
   const [theme, setTheme] = useState('dark');
   const [lastWsMessage, setLastWsMessage] = useState(null);
 
@@ -13,22 +18,35 @@ export default function App() {
   const [parts, setParts] = useState([]);
   const [machines, setMachines] = useState([]);
 
-  // Fetch Master Data (Workers, Parts, Machines)
+  // Authenticated API Helper
+  const authFetch = async (url, options = {}) => {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(options.headers || {})
+    };
+
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401 || res.status === 403) {
+      // Token expired or invalid -> Logout user safely
+      handleLogout();
+    }
+    return res;
+  };
+
+  // Fetch Master Data using authenticated requests
   const fetchMasterData = async () => {
+    if (!authToken) return;
     try {
       const [wRes, pRes, mRes] = await Promise.all([
-        fetch('/api/workers'),
-        fetch('/api/parts'),
-        fetch('/api/machines')
+        authFetch('/api/workers'),
+        authFetch('/api/parts'),
+        authFetch('/api/machines')
       ]);
 
-      const wData = await wRes.json();
-      const pData = await pRes.json();
-      const mData = await mRes.json();
-
-      setWorkers(wData);
-      setParts(pData);
-      setMachines(mData);
+      if (wRes.ok) setWorkers(await wRes.json());
+      if (pRes.ok) setParts(await pRes.json());
+      if (mRes.ok) setMachines(await mRes.json());
     } catch (err) {
       console.error('Error fetching master data:', err);
     }
@@ -36,17 +54,34 @@ export default function App() {
 
   useEffect(() => {
     fetchMasterData();
-  }, []);
+  }, [authToken]);
 
-  // Handle addition of a new worker
+  // Handle Login Event
+  const handleLogin = (user, token) => {
+    setCurrentUser(user);
+    setAuthToken(token);
+    localStorage.setItem('indus_user', JSON.stringify(user));
+    localStorage.setItem('indus_token', token);
+  };
+
+  // Handle Logout Event
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setAuthToken('');
+    localStorage.removeItem('indus_user');
+    localStorage.removeItem('indus_token');
+  };
+
   const handleWorkerAdded = (newWorker) => {
     setWorkers(prev => [...prev, newWorker]);
   };
 
-  // Set up WebSocket real-time connection silently
+  // Authenticated WebSocket Connection
   useEffect(() => {
+    if (!authToken) return;
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/ws?token=${authToken}`;
     let ws;
 
     const connectWs = () => {
@@ -61,8 +96,10 @@ export default function App() {
         }
       };
 
-      ws.onclose = () => {
-        setTimeout(connectWs, 3000);
+      ws.onclose = (event) => {
+        if (event.code !== 4001 && event.code !== 4002) {
+          setTimeout(connectWs, 3000);
+        }
       };
     };
 
@@ -71,7 +108,7 @@ export default function App() {
     return () => {
       if (ws) ws.close();
     };
-  }, []);
+  }, [authToken]);
 
   // Theme toggle
   const toggleTheme = () => {
@@ -80,9 +117,9 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
-  // If user is not logged in, render Login Page
-  if (!currentUser) {
-    return <LoginPage workers={workers} onLogin={(usr) => setCurrentUser(usr)} />;
+  // Render Login Page if unauthenticated
+  if (!currentUser || !authToken) {
+    return <LoginPage workers={workers} onLogin={handleLogin} />;
   }
 
   return (
@@ -118,7 +155,7 @@ export default function App() {
                 INDUS PRODUCTION MANAGER
               </h1>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {currentUser.role === 'admin' ? `Admin Portal (${workers.length} Workers)` : `Worker Site: ${currentUser.name}`}
+                {currentUser.role === 'admin' ? `Admin Portal` : `Worker Site: ${currentUser.name}`}
               </p>
             </div>
           </div>
@@ -134,7 +171,7 @@ export default function App() {
               {theme === 'dark' ? <Sun size={15} color="var(--accent-yellow)" /> : <Moon size={15} />}
             </button>
 
-            <button onClick={() => setCurrentUser(null)} className="btn btn-secondary btn-sm" title="Sign Out">
+            <button onClick={handleLogout} className="btn btn-secondary btn-sm" title="Sign Out">
               <LogOut size={15} /> Logout
             </button>
           </div>
@@ -151,6 +188,7 @@ export default function App() {
             machines={machines} 
             lastWsMessage={lastWsMessage} 
             onWorkerAdded={handleWorkerAdded}
+            authFetch={authFetch}
           />
         ) : (
           <WorkerInterface 
@@ -159,6 +197,7 @@ export default function App() {
             parts={parts} 
             machines={machines} 
             lastWsMessage={lastWsMessage} 
+            authFetch={authFetch}
           />
         )}
       </main>
@@ -171,7 +210,7 @@ export default function App() {
         fontSize: '0.8rem',
         color: 'var(--text-muted)'
       }}>
-        Indus Industrial Production Management System &bull; Enterprise 100+ Worker Roster System
+        Indus Industrial Production Management System &bull; Server Authenticated Security Model Active
       </footer>
     </div>
   );

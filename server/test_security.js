@@ -1,0 +1,111 @@
+// Using native Node 18+ fetch
+
+const BASE_URL = 'http://localhost:5000';
+
+async function runSecurityTests() {
+  console.log('--------------------------------------------------');
+  console.log('🔒 RUNNING AUTOMATED SECURITY SUITE & AUDIT VERIFICATION');
+  console.log('--------------------------------------------------');
+
+  let passed = 0;
+  let failed = 0;
+
+  const assert = (condition, testName, details = '') => {
+    if (condition) {
+      console.log(`✅ [PASS] ${testName}`);
+      passed++;
+    } else {
+      console.error(`❌ [FAIL] ${testName} - ${details}`);
+      failed++;
+    }
+  };
+
+  try {
+    // Test 1: Unauthenticated request to /api/hourly-logs
+    const unauthRes = await fetch(`${BASE_URL}/api/hourly-logs`);
+    assert(unauthRes.status === 401, 'Test 1: Reject unauthenticated API access with 401');
+
+    // Test 2: Invalid admin login credentials
+    const badAdminRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin', username: 'admin', password: 'wrongpassword' })
+    });
+    assert(badAdminRes.status === 401, 'Test 2: Reject invalid admin credentials with 401');
+
+    // Test 3: Valid admin login
+    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin', username: 'admin', password: 'admin123' })
+    });
+    const adminData = await adminLoginRes.json();
+    assert(adminLoginRes.status === 200 && adminData.token, 'Test 3: Issue valid JWT token for authenticated Admin');
+
+    const adminToken = adminData.token;
+
+    // Test 4: Valid worker login
+    const workerLoginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'worker', workerCode: 'WRK-1001' })
+    });
+    const workerData = await workerLoginRes.json();
+    assert(workerLoginRes.status === 200 && workerData.token, 'Test 4: Issue valid JWT token for authenticated Worker');
+
+    const workerToken = workerData.token;
+
+    // Test 5: Worker attempting supervisor sign-off (Admin-only action)
+    const workerApproveRes = await fetch(`${BASE_URL}/api/hourly-logs/approve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${workerToken}`
+      },
+      body: JSON.stringify({ id: 1, supervisor_approved: 1 })
+    });
+    assert(workerApproveRes.status === 403, 'Test 5: Block worker from performing Admin supervisor sign-off with 403 Forbidden');
+
+    // Test 6: Worker attempting out-of-window time slot edit (Server Time-Lock)
+    const today = new Date().toISOString().split('T')[0];
+    const outOfWindowRes = await fetch(`${BASE_URL}/api/hourly-logs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${workerToken}`
+      },
+      body: JSON.stringify({
+        date: today,
+        shift: 'A',
+        time_slot: '00:00-01:00', // Time slot long past
+        part_number: 'CCW2410',
+        machine_name: 'M/C 392',
+        worker_name: 'Lavkush',
+        produced_qty: 500
+      })
+    });
+    assert(outOfWindowRes.status === 403, 'Test 6: Server enforces +15 min time-lock and rejects out-of-window worker edit with 403 Forbidden');
+
+    // Test 7: Authenticated admin performing supervisor approval
+    const adminApproveRes = await fetch(`${BASE_URL}/api/hourly-logs/approve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ id: 1, supervisor_approved: 1 })
+    });
+    assert(adminApproveRes.status === 200, 'Test 7: Allow authenticated Admin to perform supervisor sign-off');
+
+    console.log('--------------------------------------------------');
+    console.log(`SECURITY SUITE COMPLETED: ${passed} Passed, ${failed} Failed`);
+    console.log('--------------------------------------------------');
+
+    if (failed > 0) process.exit(1);
+  } catch (err) {
+    console.error('Error running security test suite:', err);
+    process.exit(1);
+  }
+}
+
+runSecurityTests();

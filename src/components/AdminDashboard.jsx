@@ -1,345 +1,327 @@
 import React, { useState, useEffect } from 'react';
-import { Target, Users, Cpu, AlertCircle, ShieldCheck, Activity, PlusCircle, Layers, BarChart3, UserCheck } from 'lucide-react';
+import { 
+  Users, Cpu, Layers, CheckCircle2, AlertTriangle, Clock, TrendingUp, 
+  BarChart3, Settings, ShieldCheck, UserCheck, Plus, RefreshCw, FileText, Calendar, Filter
+} from 'lucide-react';
 import TargetAllocator from './TargetAllocator.jsx';
 import HistoricalAnalytics from './HistoricalAnalytics.jsx';
 import WorkerManager from './WorkerManager.jsx';
 
-export default function AdminDashboard({ workers, parts, machines, lastWsMessage, onWorkerAdded }) {
-  const [adminNav, setAdminNav] = useState('live'); // 'live' | 'analytics' | 'workers'
+export default function AdminDashboard({ workers, parts, machines, lastWsMessage, onWorkerAdded, authFetch }) {
+  const [activeTab, setActiveTab] = useState('live'); // 'live' | 'analytics' | 'workers'
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [shift, setShift] = useState('A');
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
+  
   const [assignments, setAssignments] = useState([]);
-  const [logs, setLogs] = useState([]);
+  const [hourlyLogs, setHourlyLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showAllocator, setShowAllocator] = useState(false);
 
-  const fetchAdminData = async () => {
+  const apiFetch = authFetch || fetch;
+
+  // Fetch Dashboard Live Data
+  const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch current assignments for the selected day/shift
-      const assignRes = await fetch(`/api/assignments?date=${date}&shift=${shift}`);
-      const assignData = await assignRes.json();
-      setAssignments(assignData);
+      const [assignRes, logsRes] = await Promise.all([
+        apiFetch(`/api/assignments?date=${date}&shift=${shift}`),
+        apiFetch(`/api/hourly-logs?date=${date}&shift=${shift}`)
+      ]);
 
-      // 2. Fetch all hourly logs for the selected day/shift
-      const logsRes = await fetch(`/api/hourly-logs?date=${date}&shift=${shift}`);
-      const logsData = await logsRes.json();
-      setLogs(logsData);
+      if (assignRes.ok) setAssignments(await assignRes.json());
+      if (logsRes.ok) setHourlyLogs(await logsRes.json());
     } catch (err) {
-      console.error('Error fetching admin data:', err);
+      console.error('Error fetching dashboard live data:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAdminData();
+    fetchDashboardData();
   }, [date, shift]);
 
-  // Real-time WebSocket event listener
+  // Realtime WS updates trigger re-fetch
   useEffect(() => {
     if (lastWsMessage) {
-      if (lastWsMessage.type === 'TARGET_UPDATED' || lastWsMessage.type === 'HOURLY_LOG_UPDATED') {
-        fetchAdminData();
-      }
+      fetchDashboardData();
     }
   }, [lastWsMessage]);
 
-  const handleApprove = async (logId, currentStatus) => {
+  // Toggle Supervisor Sign-off
+  const handleToggleApprove = async (logId, currentStatus) => {
     try {
-      await fetch('/api/hourly-logs/approve', {
+      const res = await apiFetch('/api/hourly-logs/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: logId, supervisor_approved: !currentStatus })
       });
-      fetchAdminData();
+      if (res.ok) fetchDashboardData();
     } catch (err) {
-      console.error('Error approving log:', err);
+      console.error('Error approving hourly log:', err);
     }
   };
 
-  // Group logs by worker & machine for live monitor cards
-  const workerGroups = assignments.map(a => {
-    const workerLogs = logs.filter(l => l.worker_name === a.worker_name && l.machine_name === a.machine_name);
-    const plannedSum = workerLogs.reduce((sum, l) => sum + (l.planned_qty || 0), 0);
-    const producedSum = workerLogs.reduce((sum, l) => sum + (l.produced_qty || 0), 0);
-    const eff = plannedSum > 0 ? Math.round((producedSum / plannedSum) * 100) : 0;
+  // Dashboard Overview Metrics
+  const totalPlannedPcs = hourlyLogs.reduce((sum, l) => sum + (parseInt(l.planned_qty) || 0), 0);
+  const totalProducedPcs = hourlyLogs.reduce((sum, l) => sum + (parseInt(l.produced_qty) || 0), 0);
+  const liveEfficiency = totalPlannedPcs > 0 ? ((totalProducedPcs / totalPlannedPcs) * 100).toFixed(1) : 0;
+  
+  const activeWorkersCount = new Set(assignments.map(a => a.worker_name)).size;
+  const activeMachinesCount = new Set(assignments.map(a => a.machine_name)).size;
 
-    return {
-      assignment: a,
-      logs: workerLogs,
-      plannedSum,
-      producedSum,
-      eff
-    };
-  });
-
-  // Extract recent remarks / downtime alerts
-  const downtimeAlerts = logs.filter(l => l.remarks && l.remarks.trim() !== '');
+  const downtimeAlerts = hourlyLogs.filter(l => l.remarks && l.remarks.trim() !== '');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Target Allocator Modal */}
-      {showAllocator && (
-        <TargetAllocator 
-          workers={workers} 
-          parts={parts} 
-          machines={machines} 
-          onClose={() => setShowAllocator(false)} 
-          onTargetAssigned={() => { fetchAdminData(); }}
-        />
-      )}
+      
+      {/* Admin Sub-Tab Navigation */}
+      <div className="glass-panel" style={{ padding: '0.6rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        
+        {/* Navigation Tabs */}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button 
+            onClick={() => setActiveTab('live')}
+            className={`btn ${activeTab === 'live' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+          >
+            <TrendingUp size={16} /> Live Operations
+          </button>
 
-      {/* Admin Top Bar with Sub-Navigation for Analytics & Worker Directory */}
-      <div className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Activity color="var(--accent-cyan)" size={24} />
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Admin Command & Analytics Center</h2>
+          <button 
+            onClick={() => setActiveTab('analytics')}
+            className={`btn ${activeTab === 'analytics' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+          >
+            <BarChart3 size={16} /> Historical Analytics
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('workers')}
+            className={`btn ${activeTab === 'workers' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+          >
+            <Users size={16} /> Worker Roster ({workers.length})
+          </button>
+        </div>
+
+        {/* Global Date / Shift Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
+            <Calendar size={15} color="var(--accent-cyan)" />
+            <input 
+              type="date" 
+              className="table-input" 
+              value={date} 
+              onChange={(e) => setDate(e.target.value)} 
+              style={{ width: '135px', padding: '0.35rem 0.6rem' }}
+            />
           </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            Plant Management System &bull; {workers.length} Registered Workers in Enterprise Roster
-          </p>
-        </div>
 
-        {/* Admin Navigation Tabs */}
-        <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.35rem', borderRadius: '10px', border: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setAdminNav('live')}
-            className={`btn ${adminNav === 'live' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ border: 'none', padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}
+          <select 
+            className="table-input" 
+            value={shift} 
+            onChange={(e) => setShift(e.target.value)} 
+            style={{ width: '90px', padding: '0.35rem 0.6rem' }}
           >
-            <Activity size={15} /> Live Operations
-          </button>
+            <option value="A">Shift A</option>
+            <option value="B">Shift B</option>
+          </select>
 
-          <button
-            onClick={() => setAdminNav('analytics')}
-            className={`btn ${adminNav === 'analytics' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ border: 'none', padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}
-          >
-            <BarChart3 size={15} /> Historical Analytics
-          </button>
-
-          <button
-            onClick={() => setAdminNav('workers')}
-            className={`btn ${adminNav === 'workers' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ border: 'none', padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}
-          >
-            <Users size={15} /> Worker Roster ({workers.length})
-          </button>
-        </div>
-
-        {adminNav === 'live' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <input type="date" className="form-control" value={date} onChange={(e) => setDate(e.target.value)} />
-              <select className="form-control" style={{ width: '80px' }} value={shift} onChange={(e) => setShift(e.target.value)}>
-                <option value="A">Shift A</option>
-                <option value="B">Shift B</option>
-              </select>
-            </div>
-
-            <button onClick={() => setShowAllocator(true)} className="btn btn-primary">
-              <PlusCircle size={16} /> Assign Target
+          {activeTab === 'live' && (
+            <button onClick={() => setShowAllocateModal(true)} className="btn btn-primary btn-sm">
+              <Plus size={15} /> Assign Target
             </button>
-          </div>
-        )}
+          )}
+        </div>
+
       </div>
 
-      {/* View Routing */}
-      {adminNav === 'analytics' ? (
-        <HistoricalAnalytics workers={workers} parts={parts} machines={machines} />
-      ) : adminNav === 'workers' ? (
-        <WorkerManager workers={workers} onWorkerAdded={(w) => { onWorkerAdded(w); }} />
+      {/* RENDER TAB CONTENTS */}
+      {activeTab === 'analytics' ? (
+        <HistoricalAnalytics parts={parts} machines={machines} workers={workers} authFetch={apiFetch} />
+      ) : activeTab === 'workers' ? (
+        <WorkerManager workers={workers} onWorkerAdded={onWorkerAdded} authFetch={apiFetch} />
       ) : (
-        /* Render Live Operations View */
+        /* LIVE OPERATIONS TAB */
         <>
-          {/* Summary Stat Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-            <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent-blue)' }}>
+          {/* Executive KPI Scorecards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+            <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid var(--accent-blue)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Active Assignments</span>
-                <Users size={18} color="var(--accent-blue)" />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Shift Planned Target</span>
+                <Layers color="var(--accent-blue)" size={20} />
               </div>
-              <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: '0.2rem' }}>
-                {assignments.length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Workers Active</span>
+              <div className="font-mono" style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.4rem', color: 'var(--accent-blue)' }}>
+                {totalPlannedPcs.toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Shift {shift} Target Across Lines</div>
             </div>
 
-            <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent-cyan)' }}>
+            <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid var(--accent-green)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Planned Target</span>
-                <Target size={18} color="var(--accent-cyan)" />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Actual Produced Qty</span>
+                <CheckCircle2 color="var(--accent-green)" size={20} />
               </div>
-              <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: '0.2rem' }}>
-                {workerGroups.reduce((acc, g) => acc + g.plannedSum, 0).toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
+              <div className="font-mono" style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.4rem', color: 'var(--accent-green)' }}>
+                {totalProducedPcs.toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Real-time shop floor fulfillment</div>
             </div>
 
-            <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent-green)' }}>
+            <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: `4px solid ${liveEfficiency >= 90 ? 'var(--accent-green)' : liveEfficiency >= 75 ? 'var(--accent-yellow)' : 'var(--accent-red)'}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Produced Today</span>
-                <Layers size={18} color="var(--accent-green)" />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Live Efficiency Rate</span>
+                <TrendingUp color="var(--accent-cyan)" size={20} />
               </div>
-              <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-green)', marginTop: '0.2rem' }}>
-                {workerGroups.reduce((acc, g) => acc + g.producedSum, 0).toLocaleString()} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Pcs</span>
+              <div className="font-mono" style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.4rem', color: liveEfficiency >= 90 ? 'var(--accent-green)' : liveEfficiency >= 75 ? 'var(--accent-yellow)' : 'var(--accent-red)' }}>
+                {liveEfficiency}%
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Hourly fulfillment index</div>
             </div>
 
-            <div className="glass-panel" style={{ borderLeft: '4px solid var(--accent-yellow)' }}>
+            <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid var(--accent-yellow)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Downtime Remarks Logged</span>
-                <AlertCircle size={18} color="var(--accent-yellow)" />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Active Production Matrix</span>
+                <Users color="var(--accent-yellow)" size={20} />
               </div>
-              <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-yellow)', marginTop: '0.2rem' }}>
-                {downtimeAlerts.length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Alerts</span>
+              <div className="font-mono" style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.4rem' }}>
+                {activeWorkersCount} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Workers / {activeMachinesCount} M/Cs</span>
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Active assigned shop floor lines</div>
             </div>
           </div>
 
-          {/* Real-time Worker Assignment & Live Progress Matrix */}
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <Users color="var(--accent-cyan)" size={20} /> Active Worker Daily Deployments & Hourly Progress
-          </h3>
-
-          {workerGroups.length === 0 ? (
-            <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
-              <Target size={40} color="var(--text-muted)" style={{ marginBottom: '1rem', opacity: 0.5 }} />
-              <h4 style={{ fontSize: '1.1rem', fontWeight: 700 }}>No Target Assignments Found for Today</h4>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.3rem', marginBottom: '1.2rem' }}>
-                Click below to assign part numbers and targets to workers for Shift {shift}.
-              </p>
-              <button onClick={() => setShowAllocator(true)} className="btn btn-primary">
-                <PlusCircle size={16} /> Assign Target Now
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1.2rem' }}>
-              {workerGroups.map((group, idx) => {
-                const a = group.assignment;
-                return (
-                  <div key={idx} className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-                      <div>
-                        <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>{a.worker_name}</h4>
-                        <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
-                          <Cpu size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                          {a.machine_name} &bull; Part: <strong style={{ color: 'var(--text-main)' }}>{a.part_number}</strong>
-                        </p>
-                      </div>
-                      <span className={`badge ${group.eff >= 100 ? 'badge-green' : group.eff >= 80 ? 'badge-yellow' : 'badge-red'}`}>
-                        {group.eff}% Fulfilled
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.85rem' }}>
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Target Rate:</span>{' '}
-                        <strong className="font-mono">{a.planned_hourly_qty} Pcs/Hr</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Job #:</span>{' '}
-                        <span className="font-mono">{a.job_number || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Produced:</span>{' '}
-                        <strong className="font-mono" style={{ color: 'var(--accent-green)' }}>{group.producedSum} Pcs</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: 'var(--text-muted)' }}>Target Total:</span>{' '}
-                        <span className="font-mono">{group.plannedSum} Pcs</span>
-                      </div>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.3rem', color: 'var(--text-muted)' }}>
-                        <span>Target Fulfillment Progress</span>
-                        <span className="font-mono">{group.producedSum} / {group.plannedSum}</span>
-                      </div>
-                      <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${Math.min(100, group.eff)}%`,
-                          height: '100%',
-                          background: group.eff >= 100 ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #06b6d4, #3b82f6)',
-                          borderRadius: '4px',
-                          transition: 'width 0.5s ease'
-                        }} />
-                      </div>
-                    </div>
-
-                    {/* Hourly breakdown mini table */}
-                    <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-                        Hourly Fulfillment Breakdown
-                      </div>
-                      <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                        {group.logs.map((l, lIdx) => {
-                          const hourPct = l.planned_qty > 0 ? Math.round((l.produced_qty / l.planned_qty) * 100) : 0;
-                          return (
-                            <div key={lIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', padding: '0.3rem 0.5rem', background: 'rgba(0,0,0,0.15)', borderRadius: '4px' }}>
-                              <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{l.time_slot}</span>
-                              <span className="font-mono">
-                                <strong>{l.produced_qty}</strong> / {l.planned_qty}
-                              </span>
-                              <span className={`badge ${hourPct >= 100 ? 'badge-green' : hourPct >= 80 ? 'badge-yellow' : 'badge-red'}`} style={{ fontSize: '0.7rem' }}>
-                                {hourPct}%
-                              </span>
-                              <button 
-                                onClick={() => handleApprove(l.id, l.supervisor_approved)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: l.supervisor_approved ? 'var(--accent-green)' : 'var(--text-muted)' }}
-                                title={l.supervisor_approved ? 'Supervisor Approved' : 'Click to Approve'}
-                              >
-                                <ShieldCheck size={14} />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Live Downtime Remarks Alert Feed */}
-          {downtimeAlerts.length > 0 && (
-            <div className="glass-panel">
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--accent-yellow)' }}>
-                <AlertCircle size={18} /> Production Remarks & Downtime Log Feed
+          {/* Active Target Allocation Matrix */}
+          <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '1.2rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <UserCheck size={18} color="var(--accent-cyan)" /> Daily Worker & Machine Target Allocations
               </h3>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Showing Shift {shift} Allocations
+              </span>
+            </div>
 
-              <div className="prod-table-container">
+            {assignments.length === 0 ? (
+              <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <p>No target allocations assigned for Shift {shift} on {date}.</p>
+                <button onClick={() => setShowAllocateModal(true)} className="btn btn-primary btn-sm" style={{ marginTop: '0.8rem' }}>
+                  <Plus size={14} /> Assign Target to Worker
+                </button>
+              </div>
+            ) : (
+              <div className="prod-table-container" style={{ border: 'none' }}>
                 <table className="prod-table">
                   <thead>
                     <tr>
-                      <th>Time Slot</th>
-                      <th>Worker</th>
-                      <th>Machine</th>
+                      <th>Worker Name</th>
                       <th>Part Number</th>
-                      <th>Produced / Planned</th>
-                      <th>Remark / Downtime Description</th>
+                      <th>Machine Name</th>
+                      <th>Target Rate (Pcs/Hr)</th>
+                      <th>Shift Target</th>
+                      <th>Job / Tube Spec</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {downtimeAlerts.map((alt, idx) => (
+                    {assignments.map((assign, idx) => (
                       <tr key={idx}>
-                        <td className="font-mono">{alt.time_slot}</td>
-                        <td><strong>{alt.worker_name}</strong></td>
-                        <td>{alt.machine_name}</td>
-                        <td><span className="badge badge-blue">{alt.part_number}</span></td>
-                        <td className="font-mono">{alt.produced_qty} / {alt.planned_qty}</td>
-                        <td style={{ color: 'var(--accent-yellow)', fontWeight: 600 }}>{alt.remarks}</td>
+                        <td><strong>{assign.worker_name}</strong></td>
+                        <td className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>{assign.part_number}</td>
+                        <td>{assign.machine_name}</td>
+                        <td className="font-mono" style={{ fontWeight: 700 }}>{assign.planned_hourly_qty} Pcs/Hr</td>
+                        <td className="font-mono" style={{ color: 'var(--accent-blue)', fontWeight: 700 }}>
+                          {(assign.planned_hourly_qty * 12).toLocaleString()} Pcs
+                        </td>
+                        <td style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>
+                          {assign.job_number || 'JOB-001'} ({assign.tube_spec || 'Standard'})
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            )}
+          </div>
+
+          {/* Real-time Shop-Floor Downtime Alerts & Log Approvals */}
+          <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '1.2rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <AlertTriangle size={18} color="var(--accent-yellow)" /> Shop-Floor Downtime Remarks & Sign-offs
+              </h3>
+              <span className="badge badge-yellow">{downtimeAlerts.length} Downtime Logs</span>
             </div>
-          )}
+
+            <div className="prod-table-container" style={{ border: 'none' }}>
+              <table className="prod-table">
+                <thead>
+                  <tr>
+                    <th>Time Slot</th>
+                    <th>Worker</th>
+                    <th>Part Number</th>
+                    <th>Planned / Produced</th>
+                    <th>Downtime Remark</th>
+                    <th>Approval Status</th>
+                    <th style={{ textAlign: 'center' }}>Sign Off</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hourlyLogs.filter(l => l.produced_qty > 0 || l.remarks).map((log, idx) => {
+                    const pct = log.planned_qty > 0 ? Math.round((log.produced_qty / log.planned_qty) * 100) : 0;
+                    return (
+                      <tr key={idx}>
+                        <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>{log.time_slot}</td>
+                        <td>{log.worker_name}</td>
+                        <td className="font-mono">{log.part_number}</td>
+                        <td className="font-mono">
+                          {log.produced_qty} / {log.planned_qty} ({pct}%)
+                        </td>
+                        <td style={{ color: log.remarks ? 'var(--accent-red)' : 'var(--text-muted)' }}>
+                          {log.remarks || 'Normal operation'}
+                        </td>
+                        <td>
+                          {log.supervisor_approved ? (
+                            <span className="badge badge-green"><ShieldCheck size={12} /> Approved</span>
+                          ) : (
+                            <span className="badge badge-yellow">Pending Review</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button 
+                            onClick={() => handleToggleApprove(log.id, log.supervisor_approved)}
+                            className={`btn ${log.supervisor_approved ? 'btn-secondary' : 'btn-primary'} btn-sm`}
+                          >
+                            {log.supervisor_approved ? 'Unapprove' : 'Sign Off'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </>
       )}
+
+      {/* Target Allocation Modal */}
+      {showAllocateModal && (
+        <TargetAllocator 
+          workers={workers} 
+          parts={parts} 
+          machines={machines} 
+          date={date} 
+          shift={shift} 
+          onClose={() => setShowAllocateModal(false)}
+          onSuccess={() => {
+            setShowAllocateModal(false);
+            fetchDashboardData();
+          }}
+          authFetch={apiFetch}
+        />
+      )}
+
     </div>
   );
 }
