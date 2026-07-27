@@ -1,14 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, CheckCircle, Save, User, Cpu, ShieldCheck, FileSpreadsheet, Lock, Unlock, AlertTriangle, Calendar } from 'lucide-react';
 
+// Helper for local YYYY-MM-DD date string (prevents UTC timezone date jumping)
+const getLocalDateString = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function WorkerInterface({ currentUser, workers, parts, machines, lastWsMessage, authFetch }) {
   const [selectedWorker, setSelectedWorker] = useState(currentUser?.name || (workers.length > 0 ? workers[0].name : 'Lavkush'));
   const [selectedMachine, setSelectedMachine] = useState(machines.length > 0 ? machines[0].name : 'M/C 392');
   const [selectedPart, setSelectedPart] = useState(parts.length > 0 ? parts[0].part_number : 'CCW2410');
   const [shift, setShift] = useState('A');
   
-  const todayStr = new Date().toISOString().split('T')[0];
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState(getLocalDateString());
   const [assignmentInfo, setAssignmentInfo] = useState(null);
 
   // Time Lock Simulation for Admin test mode
@@ -29,11 +36,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
   ];
 
   const apiFetch = authFetch || fetch;
-
-  // Compute yesterday string
-  const yesterdayObj = new Date();
-  yesterdayObj.setDate(yesterdayObj.getDate() - 1);
-  const yesterdayStr = yesterdayObj.toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
 
   // Check client-side slot time status (+15 minutes grace period)
   const getSlotTimeStatus = (timeSlotStr, logDateStr) => {
@@ -260,16 +263,8 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
           <div className="form-group">
             <label className="form-label"><Calendar size={13} style={{ marginRight: '4px' }} /> Date & Shift</label>
-            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <input type="date" className="form-control" style={{ flex: 1, minWidth: '130px' }} value={date} onChange={(e) => setDate(e.target.value)} />
-              <button 
-                type="button" 
-                onClick={() => setDate(date === todayStr ? yesterdayStr : todayStr)} 
-                className="btn btn-secondary btn-sm"
-                title={date === todayStr ? "Switch to Yesterday" : "Switch to Today"}
-              >
-                {date === todayStr ? 'Yesterday' : 'Today'}
-              </button>
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <input type="date" className="form-control" style={{ flex: 1 }} value={date} onChange={(e) => setDate(e.target.value)} />
               <select className="form-control" style={{ width: '80px' }} value={shift} onChange={(e) => setShift(e.target.value)}>
                 <option value="A">Shift A</option>
                 <option value="B">Shift B</option>
@@ -280,7 +275,6 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
         {/* Metadata info ribbon */}
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
-          <div><strong style={{ color: 'var(--text-muted)' }}>Viewing Date:</strong> <span className="font-mono" style={{ color: 'var(--accent-cyan)' }}>{date} {date === todayStr ? '(Today)' : '(Past Date)'}</span></div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Tube Spec:</strong> {assignmentInfo?.tube_spec || 'Standard Spec'}</div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Job Number:</strong> {assignmentInfo?.job_number || 'JOB-001'}</div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Target Rate:</strong> <span className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>{logs[0]?.planned_qty || 840} Pcs/Hr</span></div>
