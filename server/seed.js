@@ -1,14 +1,11 @@
 import { initDb, run, query } from './db.js';
 
 const firstNames = [
-  'Lavkush', 'Rahul', 'Amit', 'Priya', 'Vikram', 'Rajesh', 'Suresh', 'Deepak', 'Manish', 'Sanjay',
-  'Pooja', 'Neha', 'Rohan', 'Aakash', 'Kiran', 'Sunil', 'Vijay', 'Anita', 'Anand', 'Ravi',
-  'Ajay', 'Vikas', 'Gaurav', 'Nikhil', 'Kavita', 'Ritu', 'Dinesh', 'Sachin', 'Nitin', 'Mohit'
+  'Lavkush', 'Rahul', 'Amit'
 ];
 
 const lastNames = [
-  'Sharma', 'Verma', 'Singh', 'Patel', 'Kumar', 'Gupta', 'Yadav', 'Joshi', 'Mishra', 'Chauhan',
-  'Reddy', 'Nair', 'Mehta', 'Shah', 'Rao', 'Deshmukh', 'Tiwari', 'Pandey', 'Saxena', 'Bhat'
+  'Sharma', 'Verma', 'Singh'
 ];
 
 const departments = [
@@ -25,7 +22,7 @@ const seedData = async () => {
 
   // 1. Generate 120 Workers
   const generatedWorkers = [];
-  
+
   // Explicit core workers first
   generatedWorkers.push({ name: 'Lavkush', code: 'WRK-1001', department: 'Hairpin Bending Line A', shift: 'A' });
   generatedWorkers.push({ name: 'Rahul Sharma', code: 'WRK-1002', department: 'Hairpin Bending Line A', shift: 'A' });
@@ -134,7 +131,7 @@ const seedData = async () => {
   // 5. Seed Historical Logs across past 45 days for multiple workers
   console.log('Generating historical logs across 120 worker roster...');
   const currDate = new Date();
-  
+
   for (let dayOffset = 1; dayOffset <= 45; dayOffset++) {
     const pastDate = new Date(currDate);
     pastDate.setDate(currDate.getDate() - dayOffset);
