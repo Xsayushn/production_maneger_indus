@@ -66,7 +66,7 @@ async function runSecurityTests() {
     });
     assert(workerApproveRes.status === 403, 'Test 5: Block worker from performing Admin supervisor sign-off with 403 Forbidden');
 
-    // Test 6: Worker attempting out-of-window time slot edit (Server Time-Lock)
+    // Test 6: Worker attempting out-of-window time slot edit without Admin unlock
     const today = new Date().toISOString().split('T')[0];
     const outOfWindowRes = await fetch(`${BASE_URL}/api/hourly-logs`, {
       method: 'POST',
@@ -86,7 +86,47 @@ async function runSecurityTests() {
     });
     assert(outOfWindowRes.status === 403, 'Test 6: Server enforces +15 min time-lock and rejects out-of-window worker edit with 403 Forbidden');
 
-    // Test 7: Authenticated admin performing supervisor approval
+    // Test 7: Admin granting slot unlock access to worker
+    const unlockRes = await fetch(`${BASE_URL}/api/hourly-logs/unlock`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        date: today,
+        shift: 'A',
+        time_slot: '00:00-01:00',
+        part_number: 'CCW2410',
+        machine_name: 'M/C 392',
+        worker_name: 'Lavkush',
+        unlocked: true
+      })
+    });
+    const unlockText = await unlockRes.text();
+    assert(unlockRes.status === 200, 'Test 7: Allow Admin to grant slot unlock edit access for worker', `Status: ${unlockRes.status}, Body: ${unlockText}`);
+
+    // Test 8: Worker editing slot after Admin granted unlock access
+    const unlockedWorkerPostRes = await fetch(`${BASE_URL}/api/hourly-logs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${workerToken}`
+      },
+      body: JSON.stringify({
+        date: today,
+        shift: 'A',
+        time_slot: '00:00-01:00',
+        part_number: 'CCW2410',
+        machine_name: 'M/C 392',
+        worker_name: 'Lavkush',
+        produced_qty: 850
+      })
+    });
+    const postText = await unlockedWorkerPostRes.text();
+    assert(unlockedWorkerPostRes.status === 200, 'Test 8: Accept worker entry for locked slot when Admin granted unlock access', `Status: ${unlockedWorkerPostRes.status}, Body: ${postText}`);
+
+    // Test 9: Authenticated admin performing supervisor approval
     const adminApproveRes = await fetch(`${BASE_URL}/api/hourly-logs/approve`, {
       method: 'POST',
       headers: {
@@ -95,7 +135,7 @@ async function runSecurityTests() {
       },
       body: JSON.stringify({ id: 1, supervisor_approved: 1 })
     });
-    assert(adminApproveRes.status === 200, 'Test 7: Allow authenticated Admin to perform supervisor sign-off');
+    assert(adminApproveRes.status === 200, 'Test 9: Allow authenticated Admin to perform supervisor sign-off');
 
     console.log('--------------------------------------------------');
     console.log(`SECURITY SUITE COMPLETED: ${passed} Passed, ${failed} Failed`);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, Cpu, Layers, CheckCircle2, AlertTriangle, Clock, TrendingUp, 
-  BarChart3, Settings, ShieldCheck, UserCheck, Plus, RefreshCw, FileText, Calendar, Filter
+  BarChart3, Settings, ShieldCheck, UserCheck, Plus, RefreshCw, FileText, Calendar, Filter, Lock, Unlock
 } from 'lucide-react';
 import TargetAllocator from './TargetAllocator.jsx';
 import HistoricalAnalytics from './HistoricalAnalytics.jsx';
@@ -44,7 +44,13 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
   // Realtime WS updates trigger re-fetch
   useEffect(() => {
     if (lastWsMessage) {
-      fetchDashboardData();
+      if (
+        lastWsMessage.type === 'TARGET_UPDATED' || 
+        lastWsMessage.type === 'HOURLY_LOG_UPDATED' || 
+        lastWsMessage.type === 'SLOT_UNLOCKED'
+      ) {
+        fetchDashboardData();
+      }
     }
   }, [lastWsMessage]);
 
@@ -59,6 +65,28 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
       if (res.ok) fetchDashboardData();
     } catch (err) {
       console.error('Error approving hourly log:', err);
+    }
+  };
+
+  // Toggle Admin Slot Unlock Edit Access for Worker
+  const handleToggleUnlock = async (log, currentUnlockedStatus) => {
+    try {
+      const res = await apiFetch('/api/hourly-logs/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: log.date || date,
+          shift: log.shift || shift,
+          time_slot: log.time_slot,
+          machine_name: log.machine_name,
+          part_number: log.part_number,
+          worker_name: log.worker_name,
+          unlocked: !currentUnlockedStatus
+        })
+      });
+      if (res.ok) fetchDashboardData();
+    } catch (err) {
+      console.error('Error toggling slot unlock:', err);
     }
   };
 
@@ -248,9 +276,9 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
           <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '1.2rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <AlertTriangle size={18} color="var(--accent-yellow)" /> Shop-Floor Downtime Remarks & Sign-offs
+                <AlertTriangle size={18} color="var(--accent-yellow)" /> Hourly Log Entry Approvals & Worker Edit Access
               </h3>
-              <span className="badge badge-yellow">{downtimeAlerts.length} Downtime Logs</span>
+              <span className="badge badge-yellow">{hourlyLogs.length} Time Slots Monitored</span>
             </div>
 
             <div className="prod-table-container" style={{ border: 'none' }}>
@@ -262,17 +290,20 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
                     <th>Part Number</th>
                     <th>Planned / Produced</th>
                     <th>Downtime Remark</th>
+                    <th>Worker Edit Override</th>
                     <th>Approval Status</th>
                     <th style={{ textAlign: 'center' }}>Sign Off</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {hourlyLogs.filter(l => l.produced_qty > 0 || l.remarks).map((log, idx) => {
+                  {hourlyLogs.map((log, idx) => {
                     const pct = log.planned_qty > 0 ? Math.round((log.produced_qty / log.planned_qty) * 100) : 0;
+                    const isUnlocked = log.admin_unlocked === 1;
+
                     return (
-                      <tr key={idx}>
+                      <tr key={idx} style={{ backgroundColor: isUnlocked ? 'rgba(16, 185, 129, 0.06)' : 'transparent' }}>
                         <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>{log.time_slot}</td>
-                        <td>{log.worker_name}</td>
+                        <td><strong>{log.worker_name}</strong></td>
                         <td className="font-mono">{log.part_number}</td>
                         <td className="font-mono">
                           {log.produced_qty} / {log.planned_qty} ({pct}%)
@@ -281,10 +312,21 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
                           {log.remarks || 'Normal operation'}
                         </td>
                         <td>
+                          <button
+                            onClick={() => handleToggleUnlock(log, isUnlocked)}
+                            className={`btn ${isUnlocked ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                            style={{ fontSize: '0.75rem', gap: '4px' }}
+                            title={isUnlocked ? 'Worker currently has permission to edit this slot. Click to Lock.' : 'Grant Worker permission to edit Produced Qty.'}
+                          >
+                            {isUnlocked ? <Unlock size={12} color="white" /> : <Lock size={12} />}
+                            {isUnlocked ? 'Unlocked (Granting Access)' : 'Unlock Edit Access'}
+                          </button>
+                        </td>
+                        <td>
                           {log.supervisor_approved ? (
                             <span className="badge badge-green"><ShieldCheck size={12} /> Approved</span>
                           ) : (
-                            <span className="badge badge-yellow">Pending Review</span>
+                            <span className="badge badge-yellow">Pending</span>
                           )}
                         </td>
                         <td style={{ textAlign: 'center' }}>

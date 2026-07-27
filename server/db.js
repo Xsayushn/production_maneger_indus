@@ -36,7 +36,6 @@ const formatSql = (sql) => {
   if (!usePostgres) return sql;
   let paramIndex = 1;
   let formatted = sql.replace(/\?/g, () => `$${paramIndex++}`);
-  // Replace SQLite dialect keywords for Postgres compatibility
   formatted = formatted.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
   formatted = formatted.replace(/INSERT OR REPLACE INTO/gi, 'INSERT INTO');
   return formatted;
@@ -82,7 +81,6 @@ export const run = async (sql, params = []) => {
       return { id: res.rows[0]?.id || 0, changes: res.rowCount };
     } catch (err) {
       if (err.code === '23505') {
-        // Unique violation in Postgres (equivalent to INSERT OR IGNORE / ON CONFLICT DO NOTHING)
         return { id: 0, changes: 0 };
       }
       throw err;
@@ -187,6 +185,22 @@ export const initDb = async () => {
     )
   `);
 
+  // Admin Override Slot Unlocks table
+  await run(`
+    CREATE TABLE IF NOT EXISTS slot_unlocks (
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      date VARCHAR(50) NOT NULL,
+      shift VARCHAR(50) NOT NULL,
+      time_slot VARCHAR(50) NOT NULL,
+      machine_name VARCHAR(255) NOT NULL,
+      part_number VARCHAR(255) NOT NULL,
+      worker_name VARCHAR(255) NOT NULL,
+      unlocked_by VARCHAR(255) DEFAULT 'Admin',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT unq_slot_unlocks UNIQUE(date, shift, time_slot, machine_name, part_number)
+    )
+  `);
+
   // High performance indexes
   try {
     await run(`CREATE INDEX IF NOT EXISTS idx_workers_search ON workers(code, name, department);`);
@@ -194,6 +208,7 @@ export const initDb = async () => {
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_eval ON hourly_logs(year, month, week_number, date);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_worker ON hourly_logs(worker_name);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_part ON hourly_logs(part_number);`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_unlocks_search ON slot_unlocks(date, shift, time_slot, machine_name, part_number);`);
   } catch (e) {}
 
   // Seed default admin account securely if none exists

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, CheckCircle, Save, User, Cpu, ShieldCheck, FileSpreadsheet, Lock, Unlock, AlertTriangle, Calendar } from 'lucide-react';
 
-// Helper for local YYYY-MM-DD date string (prevents UTC timezone date jumping)
 const getLocalDateString = (d = new Date()) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -38,8 +37,12 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
   const apiFetch = authFetch || fetch;
   const todayStr = getLocalDateString();
 
-  // Check client-side slot time status (+15 minutes grace period)
-  const getSlotTimeStatus = (timeSlotStr, logDateStr) => {
+  // Check client-side slot time status (+15 minutes grace period or Admin Unlock)
+  const getSlotTimeStatus = (timeSlotStr, logDateStr, isAdminUnlocked = false) => {
+    if (isAdminUnlocked) {
+      return { editable: true, reason: 'Unlocked by Admin' };
+    }
+
     if (currentUser?.role === 'admin' && bypassTimeLock) {
       return { editable: true, reason: 'Admin Bypass Active' };
     }
@@ -109,6 +112,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             produced_qty: 0,
             remarks: '',
             supervisor_approved: 0,
+            admin_unlocked: 0,
             date,
             shift,
             machine_name: selectedMachine,
@@ -132,7 +136,11 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
   useEffect(() => {
     if (lastWsMessage) {
-      if (lastWsMessage.type === 'TARGET_UPDATED' || lastWsMessage.type === 'HOURLY_LOG_UPDATED') {
+      if (
+        lastWsMessage.type === 'TARGET_UPDATED' || 
+        lastWsMessage.type === 'HOURLY_LOG_UPDATED' ||
+        lastWsMessage.type === 'SLOT_UNLOCKED'
+      ) {
         fetchLogsAndAssignment();
       }
     }
@@ -146,7 +154,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
   const handleSaveSlot = async (slotIndex) => {
     const slotData = logs[slotIndex];
-    const status = getSlotTimeStatus(slotData.time_slot, date);
+    const status = getSlotTimeStatus(slotData.time_slot, date, slotData.admin_unlocked === 1);
 
     if (!status.editable) {
       setErrorMsg(`Cannot save entry: ${status.reason}`);
@@ -204,7 +212,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
               <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Hourly Production Verification Sheet</h2>
             </div>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Server Authenticated Entry: Edits allowed only during slot + 15 min grace period
+              Server Authenticated Entry: Edits allowed during slot + 15 min or when Unlocked by Admin
             </p>
           </div>
 
@@ -332,7 +340,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             <Clock size={18} color="var(--accent-cyan)" /> Hourly Production Log Entries
           </h3>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Server Enforcement: Slot Time + 15 mins
+            Server Enforcement: Slot Time + 15 mins (or Admin Override Unlock)
           </span>
         </div>
 
@@ -341,7 +349,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             <thead>
               <tr>
                 <th style={{ width: '130px' }}>Time Slot</th>
-                <th style={{ width: '140px' }}>Status / Time Lock</th>
+                <th style={{ width: '160px' }}>Status / Time Lock</th>
                 <th style={{ width: '120px' }}>Planned Qty</th>
                 <th style={{ width: '140px' }}>Produced Qty</th>
                 <th style={{ width: '130px' }}>Target %</th>
@@ -355,7 +363,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
                 const planned = parseInt(log.planned_qty) || 0;
                 const produced = parseInt(log.produced_qty) || 0;
                 const pct = planned > 0 ? Math.round((produced / planned) * 100) : 0;
-                const timeStatus = getSlotTimeStatus(log.time_slot, date);
+                const timeStatus = getSlotTimeStatus(log.time_slot, date, log.admin_unlocked === 1);
 
                 let badgeClass = 'badge-red';
                 if (pct >= 100) badgeClass = 'badge-green';
@@ -363,7 +371,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
                 return (
                   <tr key={index} style={{
-                    backgroundColor: !timeStatus.editable ? 'rgba(0,0,0,0.25)' : produced > 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
+                    backgroundColor: log.admin_unlocked === 1 ? 'rgba(16, 185, 129, 0.06)' : !timeStatus.editable ? 'rgba(0,0,0,0.25)' : produced > 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
                     opacity: !timeStatus.editable ? 0.75 : 1
                   }}>
                     <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>
@@ -371,7 +379,11 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
                     </td>
 
                     <td>
-                      {timeStatus.editable ? (
+                      {log.admin_unlocked === 1 ? (
+                        <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
+                          <Unlock size={11} /> Unlocked by Admin
+                        </span>
+                      ) : timeStatus.editable ? (
                         <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
                           <Unlock size={11} /> {timeStatus.reason}
                         </span>

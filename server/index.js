@@ -120,7 +120,6 @@ app.post('/api/auth/login', async (req, res) => {
         user: { id: admin.id, name: 'System Admin', code: 'ADM-001', role: 'admin' }
       });
     } else {
-      // Worker authentication by Employee Code or Name
       let worker;
       if (workerCode) {
         worker = await get(`SELECT * FROM workers WHERE code = ? AND status = 'active'`, [workerCode]);
@@ -349,35 +348,80 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
   }
 });
 
-// 5. Get Hourly Logs (Protected by Auth)
+// 5. Get Hourly Logs (Protected by Auth, joined with Admin Slot Unlocks)
 app.get('/api/hourly-logs', authenticateToken, async (req, res) => {
   try {
     const { date, part_number, machine_name, worker_name, shift } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
 
-    let sql = `SELECT * FROM hourly_logs WHERE date = ?`;
+    let sql = `
+      SELECT h.*, 
+        CASE WHEN u.id IS NOT NULL THEN 1 ELSE 0 END AS admin_unlocked
+      FROM hourly_logs h
+      LEFT JOIN slot_unlocks u 
+        ON h.date = u.date 
+        AND h.shift = u.shift 
+        AND h.time_slot = u.time_slot 
+        AND h.machine_name = u.machine_name 
+        AND h.part_number = u.part_number
+      WHERE h.date = ?
+    `;
     let params = [targetDate];
 
     if (part_number) {
-      sql += ` AND part_number = ?`;
+      sql += ` AND h.part_number = ?`;
       params.push(part_number);
     }
     if (machine_name) {
-      sql += ` AND machine_name = ?`;
+      sql += ` AND h.machine_name = ?`;
       params.push(machine_name);
     }
     if (worker_name) {
-      sql += ` AND worker_name = ?`;
+      sql += ` AND h.worker_name = ?`;
       params.push(worker_name);
     }
     if (shift) {
-      sql += ` AND shift = ?`;
+      sql += ` AND h.shift = ?`;
       params.push(shift);
     }
 
-    sql += ` ORDER BY time_slot ASC`;
+    sql += ` ORDER BY h.time_slot ASC`;
     const logs = await query(sql, params);
     res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ADMIN OVERRIDE SLOT UNLOCK ENDPOINT (Protected by Admin Role)
+app.post('/api/hourly-logs/unlock', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { date, shift, time_slot, machine_name, part_number, worker_name, unlocked } = req.body;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetShift = shift || 'A';
+
+    if (unlocked) {
+      await run(
+        `INSERT INTO slot_unlocks (date, shift, time_slot, machine_name, part_number, worker_name, unlocked_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (date, shift, time_slot, machine_name, part_number)
+         DO UPDATE SET worker_name = EXCLUDED.worker_name, unlocked_by = EXCLUDED.unlocked_by`,
+        [targetDate, targetShift, time_slot, machine_name, part_number, worker_name || '', req.user.name || 'Admin']
+      );
+    } else {
+      await run(
+        `DELETE FROM slot_unlocks WHERE date = ? AND shift = ? AND time_slot = ? AND machine_name = ? AND part_number = ?`,
+        [targetDate, targetShift, time_slot, machine_name, part_number]
+      );
+    }
+
+    const payload = {
+      type: 'SLOT_UNLOCKED',
+      data: { date: targetDate, shift: targetShift, time_slot, machine_name, part_number, worker_name, unlocked: !!unlocked }
+    };
+    broadcast(payload);
+
+    res.json({ message: unlocked ? 'Slot unlocked for worker edit' : 'Slot locked', data: payload.data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -402,29 +446,38 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
     const logDate = body.date || new Date().toISOString().split('T')[0];
     const logShift = body.shift || 'A';
 
-    // SERVER-SIDE TIME-LOCK VALIDATION (+15 Minutes Grace Period Rule)
+    // SERVER-SIDE TIME-LOCK VALIDATION (+15 Minutes Grace Period Rule or Admin Unlock Override)
     if (req.user.role !== 'admin') {
-      const todayStr = new Date().toISOString().split('T')[0];
-      if (logDate !== todayStr) {
-        return res.status(403).json({ error: 'Security Violation: Production records can only be updated for today.' });
-      }
+      // Check if Admin has granted explicit slot unlock override permission for this slot
+      const adminUnlockRecord = await get(
+        `SELECT id FROM slot_unlocks WHERE date = ? AND shift = ? AND time_slot = ? AND machine_name = ? AND part_number = ?`,
+        [logDate, logShift, body.time_slot, body.machine_name, body.part_number]
+      );
 
-      const now = new Date();
-      const currentMins = now.getHours() * 60 + now.getMinutes();
+      // If no admin unlock override exists, enforce standard time window rule
+      if (!adminUnlockRecord) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (logDate !== todayStr) {
+          return res.status(403).json({ error: 'Security Violation: Production records can only be updated for today.' });
+        }
 
-      const [startStr, endStr] = body.time_slot.split('-');
-      const [startH, startM] = startStr.split(':').map(Number);
-      const [endH, endM] = endStr.split(':').map(Number);
+        const now = new Date();
+        const currentMins = now.getHours() * 60 + now.getMinutes();
 
-      const slotStartMins = startH * 60 + startM;
-      const slotEndMins = endH * 60 + endM;
-      const graceEndMins = slotEndMins + 15;
+        const [startStr, endStr] = body.time_slot.split('-');
+        const [startH, startM] = startStr.split(':').map(Number);
+        const [endH, endM] = endStr.split(':').map(Number);
 
-      if (currentMins < slotStartMins) {
-        return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} has not started yet.` });
-      }
-      if (currentMins > graceEndMins) {
-        return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} is closed. Edits allowed only within slot time + 15 min grace period.` });
+        const slotStartMins = startH * 60 + startM;
+        const slotEndMins = endH * 60 + endM;
+        const graceEndMins = slotEndMins + 15;
+
+        if (currentMins < slotStartMins) {
+          return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} has not started yet. Ask Admin to grant edit access.` });
+        }
+        if (currentMins > graceEndMins) {
+          return res.status(403).json({ error: `Security Lock: Time slot ${body.time_slot} is closed. Ask Admin to grant edit access.` });
+        }
       }
     }
 
