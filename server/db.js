@@ -7,13 +7,13 @@ import bcrypt from 'bcryptjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = path.join(__dirname, '../data/production.db');
-
-// Ensure data directory exists
-const dataDir = path.dirname(dbPath);
+// Support persistent disk mount on Render (/var/data or /data) or local ./data
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
+
+const dbPath = path.join(dataDir, 'production.db');
 
 sqlite3.verbose();
 const db = new sqlite3.Database(dbPath);
@@ -158,11 +158,11 @@ export const initDb = async () => {
   // Auto-seed initial worker roster if empty
   const workerCount = await get(`SELECT COUNT(*) as count FROM workers`);
   if (!workerCount || workerCount.count === 0) {
-    console.log('Workers table is empty. Auto-seeding initial 120-worker roster...');
-    const seedScript = await import('./seed.js');
+    console.log('Workers table is empty. Auto-seeding initial worker roster...');
+    await import('./seed.js');
   }
 
-  console.log('Database initialized successfully.');
+  console.log(`Database initialized successfully at ${dbPath}`);
 };
 
 export default db;

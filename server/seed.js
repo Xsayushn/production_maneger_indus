@@ -22,7 +22,6 @@ const departments = [
 
 const seedData = async () => {
   console.log('Starting enterprise seed process with 120+ workers...');
-  await initDb();
 
   // 1. Generate 120 Workers
   const generatedWorkers = [];
@@ -46,9 +45,10 @@ const seedData = async () => {
     generatedWorkers.push({ name: fullName, code, department: dept, shift });
   }
 
+  // Use INSERT OR IGNORE so custom registered workers are NEVER overwritten or lost
   for (const w of generatedWorkers) {
     await run(
-      `INSERT OR REPLACE INTO workers (name, code, department, shift, role, status) VALUES (?, ?, ?, ?, 'worker', 'active')`,
+      `INSERT OR IGNORE INTO workers (name, code, department, shift, role, status) VALUES (?, ?, ?, ?, 'worker', 'active')`,
       [w.name, w.code, w.department, w.shift]
     );
   }
@@ -94,7 +94,7 @@ const seedData = async () => {
 
   for (const a of activeAssignments) {
     await run(
-      `INSERT OR REPLACE INTO assignments (date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number)
+      `INSERT OR IGNORE INTO assignments (date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [today, 'A', a.worker, a.part, a.mc, a.planned, a.spec, a.job]
     );
@@ -123,7 +123,7 @@ const seedData = async () => {
       const wk = Math.ceil((((d - firstJan) / 86400000) + firstJan.getDay() + 1) / 7);
 
       await run(
-        `INSERT OR REPLACE INTO hourly_logs 
+        `INSERT OR IGNORE INTO hourly_logs 
          (date, year, month, week_number, shift, time_slot, part_number, machine_name, worker_name, planned_qty, produced_qty, remarks, supervisor_approved)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [today, yr, mo, wk, 'A', slots[i], a.part, a.mc, a.worker, planned, produced, remark, i < 4 ? 1 : 0]
@@ -158,7 +158,7 @@ const seedData = async () => {
         const prodQty = Math.max(0, Math.round(pQty * (0.88 + variance)));
 
         await run(
-          `INSERT OR REPLACE INTO hourly_logs 
+          `INSERT OR IGNORE INTO hourly_logs 
            (date, year, month, week_number, shift, time_slot, part_number, machine_name, worker_name, planned_qty, produced_qty, remarks, supervisor_approved)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [dateStr, yr, mo, wk, 'A', slots[slotIdx], partObj.part_number, machineObj.name, workerObj.name, pQty, prodQty, '', 1]
