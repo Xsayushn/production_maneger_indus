@@ -9,7 +9,9 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build": "vite build",
     "preview": "vite preview",
-    "seed": "node server/seed.js"
+    "seed": "node server/seed.js",
+    "start": "node server/seed.js && node server/index.js",
+    "postinstall": "npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -2,7 +2,13 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { initDb, query, run, get } from './db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -33,7 +39,7 @@ await initDb();
 // REST API ENDPOINTS
 // ----------------------------------------------------
 
-// 1. Get Workers (With instant search & department filtering for 100s of workers)
+// 1. Get Workers
 app.get('/api/workers', async (req, res) => {
   try {
     const { search, department, status, limit } = req.query;
@@ -166,7 +172,6 @@ app.post('/api/assignments', async (req, res) => {
       [targetDate, targetShift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec || '', job_number || '']
     );
 
-    // Also update any un-submitted planned_qty slots for this day/part/machine
     const slots = [
       '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
       '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
@@ -201,7 +206,7 @@ app.post('/api/assignments', async (req, res) => {
   }
 });
 
-// 5. Get Hourly Logs (For Worker & Admin Live Monitor)
+// 5. Get Hourly Logs
 app.get('/api/hourly-logs', async (req, res) => {
   try {
     const { date, part_number, machine_name, worker_name, shift } = req.query;
@@ -267,7 +272,6 @@ app.post('/api/hourly-logs', async (req, res) => {
       [logDate, logShift, time_slot, machine_name, part_number]
     );
 
-    // Broadcast live event to Admin and connected devices
     broadcast({
       type: 'HOURLY_LOG_UPDATED',
       data: updatedLog
@@ -293,9 +297,7 @@ app.post('/api/hourly-logs/approve', async (req, res) => {
   }
 });
 
-// ----------------------------------------------------
-// HISTORICAL ANALYTICS & EVALUATION ENDPOINTS
-// ----------------------------------------------------
+// Historical Analytics Endpoint
 app.get('/api/analytics/historical', async (req, res) => {
   try {
     const { period, year, month, week, startDate, endDate, worker, part, machine } = req.query;
@@ -399,6 +401,22 @@ app.get('/api/analytics/historical', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ----------------------------------------------------
+// PRODUCTION STATIC FILE SERVING FOR CLOUD DEPLOYMENT
+// ----------------------------------------------------
+const distPath = path.join(__dirname, '../dist');
+if (fs.existsSync(distPath)) {
+  console.log(`Serving static production build from ${distPath}`);
+  app.use(express.static(distPath));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

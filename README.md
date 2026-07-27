@@ -4,7 +4,7 @@ A full-stack, real-time industrial production tracking and hourly verification s
 
 ---
 
-## 🚀 Quick Setup & Run Instructions
+## 🚀 Quick Local Run Instructions
 
 ### Prerequisites
 Before running the application, ensure you have the following installed on your machine:
@@ -49,6 +49,22 @@ Once started, open your web browser and navigate to:
 
 ---
 
+## ☁️ Deployment Guide (Render / Railway / Heroku / Cloud)
+
+This repository is configured for **Single-Port Cloud Deployment** where Node.js/Express automatically builds the React frontend, serves the static bundle, and manages WebSocket connections on a single port.
+
+### Deploying on Render (Free Hosting)
+1. Sign up on [Render.com](https://render.com/).
+2. Click **New +** -> **Web Service**.
+3. Connect your GitHub repository: `https://github.com/Xsayushn/production_maneger_indus`.
+4. Configure service settings:
+   - **Environment**: `Node`
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `npm start`
+5. Click **Create Web Service**. Your live production app URL will be generated automatically!
+
+---
+
 ## 🔑 Login Credentials & Demo Usage
 
 ### 1. Admin Portal
@@ -70,7 +86,7 @@ Once started, open your web browser and navigate to:
 - **Frontend**: React, Vite, Lucide Icons, Recharts, CSS Glassmorphism
 - **Backend**: Node.js, Express, WebSockets (`ws`)
 - **Database**: SQLite3 (`server/db.js`)
-- **Real-Time Layer**: WebSocket server on `ws://localhost:5000/ws`
+- **Real-Time Layer**: WebSocket server on `/ws`
 
 ---
 
