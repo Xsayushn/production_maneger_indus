@@ -308,15 +308,17 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
     const targetShift = body.shift || 'A';
 
     await run(
-      `INSERT OR REPLACE INTO assignments (date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assignments (date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (date, shift, worker_name, part_number, machine_name)
+       DO UPDATE SET planned_hourly_qty = EXCLUDED.planned_hourly_qty, tube_spec = EXCLUDED.tube_spec, job_number = EXCLUDED.job_number`,
       [targetDate, targetShift, body.worker_name, body.part_number, body.machine_name, body.planned_hourly_qty, body.tube_spec || '', body.job_number || '']
     );
 
     const slots = [
       '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
       '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
-      '15:00-16:00', '17:00-18:00', '18:00-19:00'
+      '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
     ];
 
     const d = new Date(targetDate);
@@ -329,9 +331,9 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
       await run(
         `INSERT INTO hourly_logs (date, year, month, week_number, shift, time_slot, part_number, machine_name, worker_name, planned_qty, produced_qty, remarks)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '')
-         ON CONFLICT(date, shift, time_slot, machine_name, part_number) 
-         DO UPDATE SET planned_qty = ?, worker_name = ?`,
-        [targetDate, yr, mo, wk, targetShift, slot, body.part_number, body.machine_name, body.worker_name, body.planned_hourly_qty, body.planned_hourly_qty, body.worker_name]
+         ON CONFLICT (date, shift, time_slot, machine_name, part_number)
+         DO UPDATE SET planned_qty = EXCLUDED.planned_qty, worker_name = EXCLUDED.worker_name`,
+        [targetDate, yr, mo, wk, targetShift, slot, body.part_number, body.machine_name, body.worker_name, body.planned_hourly_qty]
       );
     }
 
@@ -436,14 +438,14 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
       `INSERT INTO hourly_logs 
        (date, year, month, week_number, shift, time_slot, part_number, machine_name, worker_name, planned_qty, produced_qty, remarks, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(date, shift, time_slot, machine_name, part_number)
+       ON CONFLICT (date, shift, time_slot, machine_name, part_number)
        DO UPDATE SET 
-         produced_qty = ?,
-         remarks = ?,
-         worker_name = ?,
-         planned_qty = COALESCE(NULLIF(?, 0), planned_qty),
+         produced_qty = EXCLUDED.produced_qty,
+         remarks = EXCLUDED.remarks,
+         worker_name = EXCLUDED.worker_name,
+         planned_qty = COALESCE(NULLIF(EXCLUDED.planned_qty, 0), hourly_logs.planned_qty),
          updated_at = CURRENT_TIMESTAMP`,
-      [logDate, yr, mo, wk, logShift, body.time_slot, body.part_number, body.machine_name, body.worker_name, body.planned_qty || 0, body.produced_qty, body.remarks || '', body.produced_qty, body.remarks || '', body.worker_name, body.planned_qty || 0]
+      [logDate, yr, mo, wk, logShift, body.time_slot, body.part_number, body.machine_name, body.worker_name, body.planned_qty || 0, body.produced_qty, body.remarks || '']
     );
 
     const updatedLog = await get(
@@ -523,7 +525,7 @@ app.get('/api/analytics/historical', authenticateToken, requireAdmin, async (req
       selectGroup = 'CAST(year AS TEXT) AS label, year';
     } else if (period === 'monthly') {
       groupBy = 'year, month';
-      selectGroup = 'year || "-" || PRINTF("%02d", month) AS label, year, month';
+      selectGroup = 'year || "-" || LPAD(CAST(month AS TEXT), 2, "0") AS label, year, month';
     } else if (period === 'weekly') {
       groupBy = 'year, week_number';
       selectGroup = '"W" || week_number || " (" || year || ")" AS label, year, week_number';

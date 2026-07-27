@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, CheckCircle, Save, User, Cpu, ShieldCheck, FileSpreadsheet, Lock, Unlock, AlertTriangle } from 'lucide-react';
+import { Clock, CheckCircle, Save, User, Cpu, ShieldCheck, FileSpreadsheet, Lock, Unlock, AlertTriangle, Calendar } from 'lucide-react';
 
 export default function WorkerInterface({ currentUser, workers, parts, machines, lastWsMessage, authFetch }) {
   const [selectedWorker, setSelectedWorker] = useState(currentUser?.name || (workers.length > 0 ? workers[0].name : 'Lavkush'));
   const [selectedMachine, setSelectedMachine] = useState(machines.length > 0 ? machines[0].name : 'M/C 392');
   const [selectedPart, setSelectedPart] = useState(parts.length > 0 ? parts[0].part_number : 'CCW2410');
   const [shift, setShift] = useState('A');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [date, setDate] = useState(todayStr);
   const [assignmentInfo, setAssignmentInfo] = useState(null);
 
   // Time Lock Simulation for Admin test mode
@@ -26,8 +28,12 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
   ];
 
-  // Helper for authenticated requests (fallback to standard fetch if authFetch not provided)
   const apiFetch = authFetch || fetch;
+
+  // Compute yesterday string
+  const yesterdayObj = new Date();
+  yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+  const yesterdayStr = yesterdayObj.toISOString().split('T')[0];
 
   // Check client-side slot time status (+15 minutes grace period)
   const getSlotTimeStatus = (timeSlotStr, logDateStr) => {
@@ -35,12 +41,10 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
       return { editable: true, reason: 'Admin Bypass Active' };
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
     if (logDateStr !== todayStr && currentUser?.role !== 'admin') {
-      return { editable: false, reason: 'Date Locked (Only today allowed)' };
+      return { editable: false, reason: 'Date Locked (Viewing past date)' };
     }
 
-    // Determine current time in minutes from midnight
     let currentMins;
     if (simulatedTime && currentUser?.role === 'admin') {
       const [sh, sm] = simulatedTime.split(':').map(Number);
@@ -56,7 +60,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
     const slotStartMins = startH * 60 + startM;
     const slotEndMins = endH * 60 + endM;
-    const graceEndMins = slotEndMins + 15; // +15 minutes grace window
+    const graceEndMins = slotEndMins + 15;
 
     if (currentMins < slotStartMins) {
       return { editable: false, reason: `Locked (Starts at ${startStr})` };
@@ -74,7 +78,6 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
   const fetchLogsAndAssignment = async () => {
     setLoading(true);
     try {
-      // 1. Fetch assignment details for metadata
       const assignRes = await apiFetch(`/api/assignments?date=${date}&shift=${shift}`);
       if (assignRes.ok) {
         const assignments = await assignRes.json();
@@ -87,14 +90,12 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
         }
       }
 
-      // 2. Fetch logs for this shift/part/machine
       const logsRes = await apiFetch(
         `/api/hourly-logs?date=${date}&shift=${shift}&machine_name=${selectedMachine}&part_number=${selectedPart}`
       );
       if (logsRes.ok) {
         const existingLogs = await logsRes.json();
 
-        // Merge with default 12 slots
         const mergedSlots = defaultSlots.map(slot => {
           const found = existingLogs.find(l => l.time_slot === slot);
           const plannedFromAssign = assignmentInfo ? assignmentInfo.planned_hourly_qty : 840;
@@ -126,7 +127,6 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     fetchLogsAndAssignment();
   }, [date, shift, selectedMachine, selectedPart, selectedWorker]);
 
-  // Listen to live WebSocket events
   useEffect(() => {
     if (lastWsMessage) {
       if (lastWsMessage.type === 'TARGET_UPDATED' || lastWsMessage.type === 'HOURLY_LOG_UPDATED') {
@@ -186,7 +186,6 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     }
   };
 
-  // Summary calculations
   const totalPlanned = logs.reduce((sum, l) => sum + (parseInt(l.planned_qty) || 0), 0);
   const totalProduced = logs.reduce((sum, l) => sum + (parseInt(l.produced_qty) || 0), 0);
   const overallFulfillment = totalPlanned > 0 ? ((totalProduced / totalPlanned) * 100).toFixed(1) : 0;
@@ -206,7 +205,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             </p>
           </div>
 
-          {/* Admin Debug Simulation Controls (Only rendered if logged-in user is Admin) */}
+          {/* Admin Debug Simulation Controls */}
           {currentUser?.role === 'admin' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(0,0,0,0.25)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
               <Clock size={14} color="var(--accent-yellow)" />
@@ -260,9 +259,17 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
           </div>
 
           <div className="form-group">
-            <label className="form-label">Date & Shift</label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <input type="date" className="form-control" value={date} onChange={(e) => setDate(e.target.value)} />
+            <label className="form-label"><Calendar size={13} style={{ marginRight: '4px' }} /> Date & Shift</label>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <input type="date" className="form-control" style={{ flex: 1, minWidth: '130px' }} value={date} onChange={(e) => setDate(e.target.value)} />
+              <button 
+                type="button" 
+                onClick={() => setDate(date === todayStr ? yesterdayStr : todayStr)} 
+                className="btn btn-secondary btn-sm"
+                title={date === todayStr ? "Switch to Yesterday" : "Switch to Today"}
+              >
+                {date === todayStr ? 'Yesterday' : 'Today'}
+              </button>
               <select className="form-control" style={{ width: '80px' }} value={shift} onChange={(e) => setShift(e.target.value)}>
                 <option value="A">Shift A</option>
                 <option value="B">Shift B</option>
@@ -273,6 +280,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
         {/* Metadata info ribbon */}
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
+          <div><strong style={{ color: 'var(--text-muted)' }}>Viewing Date:</strong> <span className="font-mono" style={{ color: 'var(--accent-cyan)' }}>{date} {date === todayStr ? '(Today)' : '(Past Date)'}</span></div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Tube Spec:</strong> {assignmentInfo?.tube_spec || 'Standard Spec'}</div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Job Number:</strong> {assignmentInfo?.job_number || 'JOB-001'}</div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Target Rate:</strong> <span className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>{logs[0]?.planned_qty || 840} Pcs/Hr</span></div>
