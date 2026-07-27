@@ -1,15 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, ClipboardList, Sun, Moon, Wrench, LogOut, User, Shield } from 'lucide-react';
+import { Sun, Moon, Wrench, LogOut, User, Shield } from 'lucide-react';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import WorkerInterface from './components/WorkerInterface.jsx';
 import LoginPage from './components/LoginPage.jsx';
 
 export default function App() {
+  // Path-based route detection: /admin vs /
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const handlePopState = () => setCurrentPath(window.location.pathname);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const isAdminSite = currentPath.startsWith('/admin');
+
+  // Separate session states for Worker vs Admin
   const [currentUser, setCurrentUser] = useState(() => {
-    const savedUser = localStorage.getItem('indus_user');
+    const key = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
+    const savedUser = localStorage.getItem(key);
     return savedUser ? JSON.parse(savedUser) : null;
   });
-  const [authToken, setAuthToken] = useState(() => localStorage.getItem('indus_token') || '');
+
+  const [authToken, setAuthToken] = useState(() => {
+    const key = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
+    return localStorage.getItem(key) || '';
+  });
+
+  // Update session state when route changes between / and /admin
+  useEffect(() => {
+    const keyUser = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
+    const keyToken = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
+
+    const savedUser = localStorage.getItem(keyUser);
+    const savedToken = localStorage.getItem(keyToken);
+
+    setCurrentUser(savedUser ? JSON.parse(savedUser) : null);
+    setAuthToken(savedToken || '');
+  }, [isAdminSite]);
 
   const [theme, setTheme] = useState('dark');
   const [lastWsMessage, setLastWsMessage] = useState(null);
@@ -18,7 +47,7 @@ export default function App() {
   const [parts, setParts] = useState([]);
   const [machines, setMachines] = useState([]);
 
-  // Fetch Public Worker Roster for Login Dropdown
+  // Fetch Public Worker Roster for Worker Login Dropdown
   const fetchPublicWorkers = async () => {
     try {
       const res = await fetch('/api/auth/public-workers');
@@ -32,8 +61,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchPublicWorkers();
-  }, []);
+    if (!isAdminSite) {
+      fetchPublicWorkers();
+    }
+  }, [isAdminSite]);
 
   // Authenticated API Helper
   const authFetch = async (url, options = {}) => {
@@ -78,17 +109,21 @@ export default function App() {
   const handleLogin = (user, token) => {
     setCurrentUser(user);
     setAuthToken(token);
-    localStorage.setItem('indus_user', JSON.stringify(user));
-    localStorage.setItem('indus_token', token);
+    const keyUser = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
+    const keyToken = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
+    localStorage.setItem(keyUser, JSON.stringify(user));
+    localStorage.setItem(keyToken, token);
   };
 
   // Handle Logout Event
   const handleLogout = () => {
     setCurrentUser(null);
     setAuthToken('');
-    localStorage.removeItem('indus_user');
-    localStorage.removeItem('indus_token');
-    fetchPublicWorkers();
+    const keyUser = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
+    const keyToken = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
+    localStorage.removeItem(keyUser);
+    localStorage.removeItem(keyToken);
+    if (!isAdminSite) fetchPublicWorkers();
   };
 
   const handleWorkerAdded = (newWorker) => {
@@ -136,9 +171,9 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
-  // Render Login Page if unauthenticated
-  if (!currentUser || !authToken) {
-    return <LoginPage workers={workers} onLogin={handleLogin} />;
+  // Render Login Page if unauthenticated on current site
+  if (!currentUser || !authToken || (isAdminSite && currentUser.role !== 'admin')) {
+    return <LoginPage workers={workers} onLogin={handleLogin} siteMode={isAdminSite ? 'admin' : 'worker'} />;
   }
 
   return (
@@ -158,23 +193,27 @@ export default function App() {
           {/* Brand Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{
-              background: 'linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))',
+              background: isAdminSite 
+                ? 'linear-gradient(135deg, var(--accent-blue), #8b5cf6)' 
+                : 'linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))',
               width: '38px',
               height: '38px',
               borderRadius: '10px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(6, 182, 212, 0.4)'
+              boxShadow: isAdminSite 
+                ? '0 4px 12px rgba(139, 92, 246, 0.4)' 
+                : '0 4px 12px rgba(6, 182, 212, 0.4)'
             }}>
-              <Wrench color="white" size={20} />
+              {isAdminSite ? <Shield color="white" size={20} /> : <Wrench color="white" size={20} />}
             </div>
             <div>
               <h1 style={{ fontSize: '1.15rem', fontWeight: 800, letterSpacing: '-0.02em', background: 'linear-gradient(90deg, #fff, #94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                INDUS PRODUCTION MANAGER
+                {isAdminSite ? 'INDUS MANAGEMENT CENTER' : 'INDUS SHOP-FLOOR TERMINAL'}
               </h1>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {currentUser.role === 'admin' ? `Admin Portal` : `Worker Site: ${currentUser.name}`}
+                {isAdminSite ? `Admin Portal` : `Worker Site: ${currentUser.name}`}
               </p>
             </div>
           </div>
@@ -200,7 +239,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main style={{ flex: 1, maxWidth: '1400px', width: '100%', margin: '0 auto', padding: '1.5rem 1rem' }}>
-        {currentUser.role === 'admin' ? (
+        {isAdminSite ? (
           <AdminDashboard 
             workers={workers} 
             parts={parts} 
@@ -229,7 +268,7 @@ export default function App() {
         fontSize: '0.8rem',
         color: 'var(--text-muted)'
       }}>
-        Indus Industrial Production Management System &bull; Server Authenticated Security Model Active
+        Indus Industrial Production System &bull; Dedicated {isAdminSite ? 'Admin Management' : 'Shop-Floor'} Portal
       </footer>
     </div>
   );

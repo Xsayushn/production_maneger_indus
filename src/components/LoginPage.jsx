@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Wrench, Shield, User, ArrowRight, Lock, Search, Building2 } from 'lucide-react';
 
-export default function LoginPage({ workers = [], onLogin }) {
-  const [role, setRole] = useState('worker'); // 'admin' | 'worker'
+export default function LoginPage({ workers = [], onLogin, siteMode = 'worker' }) {
   const [adminUsername, setAdminUsername] = useState('admin');
   const [adminPassword, setAdminPassword] = useState('admin123');
   
@@ -19,8 +18,7 @@ export default function LoginPage({ workers = [], onLogin }) {
   useEffect(() => {
     if (workers && workers.length > 0) {
       setLocalWorkers(workers);
-    } else {
-      // Fallback direct fetch for public worker list
+    } else if (siteMode === 'worker') {
       fetch('/api/auth/public-workers')
         .then(res => res.ok ? res.json() : [])
         .then(data => {
@@ -28,7 +26,7 @@ export default function LoginPage({ workers = [], onLogin }) {
         })
         .catch(err => console.error('Public worker list fetch error:', err));
     }
-  }, [workers]);
+  }, [workers, siteMode]);
 
   // Filter workers dynamically as user types
   const filteredWorkers = useMemo(() => {
@@ -99,6 +97,8 @@ export default function LoginPage({ workers = [], onLogin }) {
     }
   };
 
+  const isAdminSite = siteMode === 'admin';
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -113,7 +113,9 @@ export default function LoginPage({ workers = [], onLogin }) {
         {/* Brand Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{
-            background: 'linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))',
+            background: isAdminSite 
+              ? 'linear-gradient(135deg, var(--accent-blue), #8b5cf6)' 
+              : 'linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))',
             width: '54px',
             height: '54px',
             borderRadius: '14px',
@@ -121,46 +123,19 @@ export default function LoginPage({ workers = [], onLogin }) {
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 1rem',
-            boxShadow: '0 8px 20px rgba(6, 182, 212, 0.4)'
+            boxShadow: isAdminSite 
+              ? '0 8px 20px rgba(139, 92, 246, 0.4)' 
+              : '0 8px 20px rgba(6, 182, 212, 0.4)'
           }}>
-            <Wrench color="white" size={28} />
+            {isAdminSite ? <Shield color="white" size={28} /> : <Wrench color="white" size={28} />}
           </div>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
-            INDUS PRODUCTION MANAGER
+
+          <h1 style={{ fontSize: '1.35rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
+            {isAdminSite ? 'INDUS MANAGEMENT CENTER' : 'INDUS SHOP-FLOOR TERMINAL'}
           </h1>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-            Secure Server-Authenticated Portal
+          <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+            {isAdminSite ? 'Executive Admin Operations Portal' : 'Hourly Production Verification Portal'}
           </p>
-        </div>
-
-        {/* Role Toggle Switcher */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '0.5rem',
-          background: 'rgba(0,0,0,0.3)',
-          padding: '0.35rem',
-          borderRadius: '10px',
-          marginBottom: '1.5rem',
-          border: '1px solid var(--border-color)'
-        }}>
-          <button
-            type="button"
-            onClick={() => { setRole('worker'); setError(''); }}
-            className={`btn ${role === 'worker' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ justifyContent: 'center', border: 'none', padding: '0.55rem' }}
-          >
-            <User size={16} /> Worker Terminal
-          </button>
-
-          <button
-            type="button"
-            onClick={() => { setRole('admin'); setError(''); }}
-            className={`btn ${role === 'admin' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ justifyContent: 'center', border: 'none', padding: '0.55rem' }}
-          >
-            <Shield size={16} /> Admin Portal
-          </button>
         </div>
 
         {error && (
@@ -178,8 +153,8 @@ export default function LoginPage({ workers = [], onLogin }) {
           </div>
         )}
 
-        {/* Worker Login Form */}
-        {role === 'worker' ? (
+        {/* Worker Site Login Form (Rendered on /) */}
+        {!isAdminSite ? (
           <form onSubmit={handleWorkerSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
             <div className="form-group">
               <label className="form-label">Search Worker Name or Employee Code</label>
@@ -223,7 +198,7 @@ export default function LoginPage({ workers = [], onLogin }) {
                         background: isSelected ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
                         border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid transparent',
                         display: 'flex',
-                        justifyContent: 'space-between',
+                        justify: 'space-between',
                         alignItems: 'center',
                         fontSize: '0.85rem'
                       }}
@@ -246,7 +221,7 @@ export default function LoginPage({ workers = [], onLogin }) {
             </button>
           </form>
         ) : (
-          /* Admin Login Form */
+          /* Admin Site Login Form (Rendered strictly on /admin) */
           <form onSubmit={handleAdminSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
             <div className="form-group">
               <label className="form-label">Admin Username</label>
@@ -271,13 +246,13 @@ export default function LoginPage({ workers = [], onLogin }) {
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }} disabled={loading}>
-              <Lock size={18} /> {loading ? 'Verifying...' : 'Sign In to Admin Center'}
+              <Lock size={18} /> {loading ? 'Verifying...' : 'Sign In to Management Center'}
             </button>
           </form>
         )}
 
         <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Indus Production System &bull; JWT Authentication Active
+          Indus Industrial System &bull; Dedicated {isAdminSite ? 'Admin Management' : 'Shop-Floor'} Portal
         </div>
       </div>
     </div>
