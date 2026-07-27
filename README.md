@@ -1,6 +1,6 @@
 # Industrial Production Management System
 
-A full-stack, real-time industrial production tracking and hourly verification system built with **Node.js, Express, SQLite, WebSockets**, and **React + Vite**.
+A full-stack, real-time industrial production tracking and hourly verification system built with **Node.js, Express, SQLite / PostgreSQL, WebSockets**, and **React + Vite**.
 
 ---
 
@@ -54,21 +54,20 @@ npm run dev
 
 ---
 
-## ☁️ Persistent Data on Render Deployment
+## ☁️ 100% Free Persistent Cloud Database (Render Free Postgres)
 
-Render's free web services use ephemeral disk containers by default (which spin down after 15 mins of inactivity). To ensure custom registered workers and hourly logs **never disappear**, attach a persistent disk on Render:
+Render offers a **100% Free PostgreSQL Database** ($0/mo, no credit card required) that stores all added workers, targets, and production numbers **permanently forever** across restarts and sleep cycles.
 
-### Steps for Persistent Data on Render:
-1. Open your Web Service on [Render.com](https://render.com/).
-2. Go to the **Disks** tab and click **Add Disk**:
-   - **Name**: `production-db-disk`
-   - **Mount Path**: `/var/data`
-   - **Size**: `1 GB`
-3. Go to **Environment** tab and add an Environment Variable:
-   - **Key**: `DATA_DIR`
-   - **Value**: `/var/data`
+### 2-Minute Setup for Free Persistent Storage:
+1. Log in to [Render.com](https://render.com/).
+2. Click **New +** -> **PostgreSQL**.
+3. Set a name (e.g. `indus-db`) and click **Create Database** (selecting the $0/mo Free Plan).
+4. Copy the **Internal Database URL** provided by Render.
+5. Open your Web Service in Render -> **Environment** tab -> Add Variable:
+   - **Key**: `DATABASE_URL`
+   - **Value**: *(paste the Internal Database URL)*
 
-Once saved, SQLite stores `production.db` directly on the persistent disk, keeping all added workers, targets, and logs permanently across restarts, sleep cycles, and redeploys!
+Once added, the system automatically switches to Cloud PostgreSQL. Every added worker, target, and log will stay saved **100% permanently for free**!
 
 ---
 

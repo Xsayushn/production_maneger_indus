@@ -1,4 +1,5 @@
 import sqlite3 from 'sqlite3';
+import pg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -7,95 +8,142 @@ import bcrypt from 'bcryptjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Support persistent disk mount on Render (/var/data or /data) or local ./data
-const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+const { Pool } = pg;
+
+const usePostgres = !!process.env.DATABASE_URL;
+let pgPool = null;
+let sqliteDb = null;
+
+if (usePostgres) {
+  console.log('Connecting to Cloud PostgreSQL Database via DATABASE_URL...');
+  pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+  });
+} else {
+  const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  const dbPath = path.join(dataDir, 'production.db');
+  sqlite3.verbose();
+  sqliteDb = new sqlite3.Database(dbPath);
+  console.log(`Connecting to Local SQLite Database at ${dbPath}`);
 }
 
-const dbPath = path.join(dataDir, 'production.db');
-
-sqlite3.verbose();
-const db = new sqlite3.Database(dbPath);
-
-// Helper function to query with Promises
-export const query = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
+// Convert ? placeholders to $1, $2 for Postgres
+const formatSql = (sql) => {
+  if (!usePostgres) return sql;
+  let paramIndex = 1;
+  let formatted = sql.replace(/\?/g, () => `$${paramIndex++}`);
+  // Replace SQLite dialect keywords for Postgres compatibility
+  formatted = formatted.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
+  formatted = formatted.replace(/INSERT OR REPLACE INTO/gi, 'INSERT INTO');
+  return formatted;
 };
 
-export const run = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
+// Universal Query Helper
+export const query = async (sql, params = []) => {
+  if (usePostgres) {
+    const res = await pgPool.query(formatSql(sql), params);
+    return res.rows;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.all(sql, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
     });
-  });
+  }
 };
 
-export const get = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
+export const get = async (sql, params = []) => {
+  if (usePostgres) {
+    const res = await pgPool.query(formatSql(sql), params);
+    return res.rows[0] || null;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.get(sql, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
     });
-  });
+  }
+};
+
+export const run = async (sql, params = []) => {
+  if (usePostgres) {
+    let pgSql = formatSql(sql);
+    if (pgSql.trim().toUpperCase().startsWith('INSERT') && !pgSql.toUpperCase().includes('RETURNING')) {
+      pgSql += ' RETURNING id';
+    }
+    try {
+      const res = await pgPool.query(pgSql, params);
+      return { id: res.rows[0]?.id || 0, changes: res.rowCount };
+    } catch (err) {
+      if (err.code === '23505') {
+        // Unique violation in Postgres (equivalent to INSERT OR IGNORE / ON CONFLICT DO NOTHING)
+        return { id: 0, changes: 0 };
+      }
+      throw err;
+    }
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(sql, params, function (err) {
+        if (err) reject(err);
+        else resolve({ id: this.lastID, changes: this.changes });
+      });
+    });
+  }
 };
 
 export const initDb = async () => {
-  await run(`PRAGMA foreign_keys = ON;`);
+  if (!usePostgres) {
+    await run(`PRAGMA foreign_keys = ON;`);
+  }
 
   // Admin users table
   await run(`
     CREATE TABLE IF NOT EXISTS admins (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      username VARCHAR(255) UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT DEFAULT 'admin',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      role VARCHAR(50) DEFAULT 'admin',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   // Workers table
   await run(`
     CREATE TABLE IF NOT EXISTS workers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      code TEXT UNIQUE NOT NULL,
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      code VARCHAR(255) UNIQUE NOT NULL,
       password_hash TEXT,
-      department TEXT DEFAULT 'Production Line',
-      shift TEXT DEFAULT 'A',
-      role TEXT DEFAULT 'worker',
-      status TEXT DEFAULT 'active'
+      department VARCHAR(255) DEFAULT 'Production Line',
+      shift VARCHAR(50) DEFAULT 'A',
+      role VARCHAR(50) DEFAULT 'worker',
+      status VARCHAR(50) DEFAULT 'active'
     )
   `);
-
-  // Migrations for existing database
-  try { await run(`ALTER TABLE workers ADD COLUMN password_hash TEXT`); } catch (e) {}
-  try { await run(`ALTER TABLE workers ADD COLUMN department TEXT DEFAULT 'Production Line'`); } catch (e) {}
-  try { await run(`ALTER TABLE workers ADD COLUMN shift TEXT DEFAULT 'A'`); } catch (e) {}
 
   // Machines table
   await run(`
     CREATE TABLE IF NOT EXISTS machines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      code TEXT UNIQUE NOT NULL,
-      line TEXT DEFAULT 'Main Assembly'
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      code VARCHAR(255) UNIQUE NOT NULL,
+      line VARCHAR(255) DEFAULT 'Main Assembly'
     )
   `);
 
   // Part numbers table
   await run(`
     CREATE TABLE IF NOT EXISTS part_numbers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      part_number TEXT UNIQUE NOT NULL,
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      part_number VARCHAR(255) UNIQUE NOT NULL,
       description TEXT,
-      tube_spec TEXT,
+      tube_spec VARCHAR(255),
       default_hourly_target INTEGER DEFAULT 840
     )
   `);
@@ -103,48 +151,50 @@ export const initDb = async () => {
   // Daily/Shift Target Allocations
   await run(`
     CREATE TABLE IF NOT EXISTS assignments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      shift TEXT NOT NULL,
-      worker_name TEXT NOT NULL,
-      part_number TEXT NOT NULL,
-      machine_name TEXT NOT NULL,
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      date VARCHAR(50) NOT NULL,
+      shift VARCHAR(50) NOT NULL,
+      worker_name VARCHAR(255) NOT NULL,
+      part_number VARCHAR(255) NOT NULL,
+      machine_name VARCHAR(255) NOT NULL,
       planned_hourly_qty INTEGER NOT NULL DEFAULT 840,
-      tube_spec TEXT,
-      job_number TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(date, shift, worker_name, part_number, machine_name) ON CONFLICT REPLACE
+      tube_spec VARCHAR(255),
+      job_number VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT unq_assignments UNIQUE(date, shift, worker_name, part_number, machine_name)
     )
   `);
 
   // Hourly production logs
   await run(`
     CREATE TABLE IF NOT EXISTS hourly_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
+      id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
+      date VARCHAR(50) NOT NULL,
       year INTEGER NOT NULL,
       month INTEGER NOT NULL,
       week_number INTEGER NOT NULL,
-      shift TEXT NOT NULL,
-      time_slot TEXT NOT NULL,
-      part_number TEXT NOT NULL,
-      machine_name TEXT NOT NULL,
-      worker_name TEXT NOT NULL,
+      shift VARCHAR(50) NOT NULL,
+      time_slot VARCHAR(50) NOT NULL,
+      part_number VARCHAR(255) NOT NULL,
+      machine_name VARCHAR(255) NOT NULL,
+      worker_name VARCHAR(255) NOT NULL,
       planned_qty INTEGER NOT NULL DEFAULT 0,
       produced_qty INTEGER NOT NULL DEFAULT 0,
       remarks TEXT DEFAULT '',
       supervisor_approved INTEGER DEFAULT 0,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(date, shift, time_slot, machine_name, part_number) ON CONFLICT REPLACE
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT unq_hourly_logs UNIQUE(date, shift, time_slot, machine_name, part_number)
     )
   `);
 
   // High performance indexes
-  await run(`CREATE INDEX IF NOT EXISTS idx_workers_search ON workers(code, name, department);`);
-  await run(`CREATE INDEX IF NOT EXISTS idx_logs_date ON hourly_logs(date);`);
-  await run(`CREATE INDEX IF NOT EXISTS idx_logs_eval ON hourly_logs(year, month, week_number, date);`);
-  await run(`CREATE INDEX IF NOT EXISTS idx_logs_worker ON hourly_logs(worker_name);`);
-  await run(`CREATE INDEX IF NOT EXISTS idx_logs_part ON hourly_logs(part_number);`);
+  try {
+    await run(`CREATE INDEX IF NOT EXISTS idx_workers_search ON workers(code, name, department);`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_logs_date ON hourly_logs(date);`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_logs_eval ON hourly_logs(year, month, week_number, date);`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_logs_worker ON hourly_logs(worker_name);`);
+    await run(`CREATE INDEX IF NOT EXISTS idx_logs_part ON hourly_logs(part_number);`);
+  } catch (e) {}
 
   // Seed default admin account securely if none exists
   const existingAdmin = await get(`SELECT id FROM admins WHERE username = 'admin'`);
@@ -157,12 +207,13 @@ export const initDb = async () => {
 
   // Auto-seed initial worker roster if empty
   const workerCount = await get(`SELECT COUNT(*) as count FROM workers`);
-  if (!workerCount || workerCount.count === 0) {
+  const countNum = parseInt(workerCount?.count || 0);
+  if (countNum === 0) {
     console.log('Workers table is empty. Auto-seeding initial worker roster...');
     await import('./seed.js');
   }
 
-  console.log(`Database initialized successfully at ${dbPath}`);
+  console.log(`Database initialization complete (${usePostgres ? 'Cloud PostgreSQL' : 'Local SQLite'}).`);
 };
 
-export default db;
+export default sqliteDb;
