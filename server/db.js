@@ -165,7 +165,7 @@ export const initDb = async () => {
     )
   `);
 
-  // Hourly production logs (with compound unique index on date, shift, time_slot, worker_name)
+  // Hourly production logs (with compound unique index on date, shift, time_slot, machine_name, part_number)
   await run(`
     CREATE TABLE IF NOT EXISTS hourly_logs (
       id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
@@ -210,9 +210,22 @@ export const initDb = async () => {
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_eval ON hourly_logs(year, month, week_number, date);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_worker ON hourly_logs(worker_name);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_part ON hourly_logs(part_number);`);
-    await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_unq_worker_slot ON hourly_logs(date, shift, time_slot, worker_name);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_unlocks_search ON slot_unlocks(date, shift, time_slot, machine_name, part_number);`);
   } catch (e) {}
+
+  // DATA MIGRATION: Normalize legacy department names & remove Shift C from existing records
+  try {
+    await run(`UPDATE workers SET department = 'Fin Press' WHERE department LIKE '%Fin Press%' OR department LIKE '%Assembly%';`);
+    await run(`UPDATE workers SET department = 'Expander' WHERE department LIKE '%Expander%' OR department LIKE '%Bending%';`);
+    await run(`UPDATE workers SET department = 'Punching' WHERE department LIKE '%Punching%' OR department LIKE '%Stamp%';`);
+    await run(`UPDATE workers SET department = 'Hairpin' WHERE department LIKE '%Hairpin%' OR department LIKE '%Coil%';`);
+    await run(`UPDATE workers SET department = 'Fin Press' WHERE department NOT IN ('Fin Press', 'Expander', 'Punching', 'Hairpin');`);
+    await run(`UPDATE workers SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
+    await run(`UPDATE assignments SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
+    await run(`UPDATE hourly_logs SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
+  } catch (err) {
+    console.warn('Data migration notice:', err.message);
+  }
 
   // Seed default admin account securely if none exists
   const existingAdmin = await get(`SELECT id FROM admins WHERE username = 'admin'`);

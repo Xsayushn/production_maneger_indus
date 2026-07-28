@@ -143,7 +143,7 @@ export default function TargetAllocator({ workers, parts, machines, date, shift,
                 type="number" 
                 className="form-control font-mono" 
                 value={plannedHourlyQty} 
-                onChange={(e) => setPlannedHourlyQty(e.target.value)} 
+                onChange={(e) => setPlannedHourlyQty(e.target.value === '' ? '' : parseInt(e.target.value, 10))} 
                 required 
                 min="1"
               />

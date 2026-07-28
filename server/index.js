@@ -360,7 +360,7 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
       worker_name: z.string(),
       part_number: z.string(),
       machine_name: z.string(),
-      planned_hourly_qty: z.number().min(1),
+      planned_hourly_qty: z.union([z.number(), z.string()]).transform(v => parseInt(v, 10)).pipe(z.number().min(1)),
       tube_spec: z.string().optional(),
       job_number: z.string().optional()
     });
@@ -368,9 +368,10 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
     const body = schema.parse(req.body);
     const targetDate = body.date || getISTDateString();
     const targetShift = body.shift || 'A';
-    const totalShiftRequirement = body.planned_hourly_qty * 12;
+    const plannedQty = Math.max(1, parseInt(body.planned_hourly_qty, 10) || 840);
+    const totalShiftRequirement = plannedQty * 12;
 
-    // STOCK MANAGEMENT CHECK & DECREMENT (P0 Fix)
+    // STOCK MANAGEMENT CHECK (P0 Fix)
     const part = await get(`SELECT stock_quantity FROM part_numbers WHERE part_number = ?`, [body.part_number]);
     if (part) {
       if (part.stock_quantity < totalShiftRequirement) {
@@ -378,8 +379,6 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
           error: `Insufficient Inventory: Part ${body.part_number} has ${part.stock_quantity} units in stock, but Shift ${targetShift} requires ${totalShiftRequirement} units.` 
         });
       }
-      // Decrement stock quantity upon allocation
-      await run(`UPDATE part_numbers SET stock_quantity = stock_quantity - ? WHERE part_number = ?`, [totalShiftRequirement, body.part_number]);
     }
 
     await run(
@@ -387,8 +386,13 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (date, shift, worker_name, part_number, machine_name)
        DO UPDATE SET planned_hourly_qty = EXCLUDED.planned_hourly_qty, tube_spec = EXCLUDED.tube_spec, job_number = EXCLUDED.job_number`,
-      [targetDate, targetShift, body.worker_name, body.part_number, body.machine_name, body.planned_hourly_qty, body.tube_spec || '', body.job_number || '']
+      [targetDate, targetShift, body.worker_name, body.part_number, body.machine_name, plannedQty, body.tube_spec || '', body.job_number || '']
     );
+
+    // Decrement stock quantity only AFTER successful allocation insert
+    if (part) {
+      await run(`UPDATE part_numbers SET stock_quantity = stock_quantity - ? WHERE part_number = ?`, [totalShiftRequirement, body.part_number]);
+    }
 
     const slots = targetShift === 'B' ? SHIFT_B_SLOTS : SHIFT_A_SLOTS;
 
@@ -404,13 +408,13 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '')
          ON CONFLICT (date, shift, time_slot, machine_name, part_number)
          DO UPDATE SET planned_qty = EXCLUDED.planned_qty, worker_name = EXCLUDED.worker_name`,
-        [targetDate, yr, mo, wk, targetShift, slot, body.part_number, body.machine_name, body.worker_name, body.planned_hourly_qty]
+        [targetDate, yr, mo, wk, targetShift, slot, body.part_number, body.machine_name, body.worker_name, plannedQty]
       );
     }
 
     const payload = {
       type: 'TARGET_UPDATED',
-      data: { date: targetDate, shift: targetShift, worker_name: body.worker_name, part_number: body.part_number, machine_name: body.machine_name, planned_hourly_qty: body.planned_hourly_qty }
+      data: { date: targetDate, shift: targetShift, worker_name: body.worker_name, part_number: body.part_number, machine_name: body.machine_name, planned_hourly_qty: plannedQty }
     };
     broadcast(payload);
 
