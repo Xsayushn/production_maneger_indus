@@ -78,6 +78,19 @@ wss.on('connection', (ws, req) => {
 // Initialize DB schema on start
 await initDb();
 
+// Shift Slots Definition (Shift A: 07:00-19:00, Shift B: 19:00-07:00)
+const SHIFT_A_SLOTS = [
+  '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
+  '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
+  '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
+];
+
+const SHIFT_B_SLOTS = [
+  '19:00-20:00', '20:00-21:00', '21:00-22:00', '22:00-23:00',
+  '23:00-00:00', '00:00-01:00', '01:00-02:00', '02:00-03:00',
+  '03:00-04:00', '04:00-05:00', '05:00-06:00', '06:00-07:00'
+];
+
 // ----------------------------------------------------
 // PUBLIC AUTHENTICATION & LOGIN ENDPOINTS
 // ----------------------------------------------------
@@ -314,11 +327,7 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
       [targetDate, targetShift, body.worker_name, body.part_number, body.machine_name, body.planned_hourly_qty, body.tube_spec || '', body.job_number || '']
     );
 
-    const slots = [
-      '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
-      '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
-      '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
-    ];
+    const slots = targetShift === 'B' ? SHIFT_B_SLOTS : SHIFT_A_SLOTS;
 
     const d = new Date(targetDate);
     const yr = d.getFullYear();
@@ -448,13 +457,11 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
 
     // SERVER-SIDE TIME-LOCK VALIDATION (+15 Minutes Grace Period Rule or Admin Unlock Override)
     if (req.user.role !== 'admin') {
-      // Check if Admin has granted explicit slot unlock override permission for this slot
       const adminUnlockRecord = await get(
         `SELECT id FROM slot_unlocks WHERE date = ? AND shift = ? AND time_slot = ? AND machine_name = ? AND part_number = ?`,
         [logDate, logShift, body.time_slot, body.machine_name, body.part_number]
       );
 
-      // If no admin unlock override exists, enforce standard time window rule
       if (!adminUnlockRecord) {
         const todayStr = new Date().toISOString().split('T')[0];
         if (logDate !== todayStr) {
@@ -462,14 +469,25 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
         }
 
         const now = new Date();
-        const currentMins = now.getHours() * 60 + now.getMinutes();
+        let currentMins = now.getHours() * 60 + now.getMinutes();
 
         const [startStr, endStr] = body.time_slot.split('-');
-        const [startH, startM] = startStr.split(':').map(Number);
-        const [endH, endM] = endStr.split(':').map(Number);
+        let [startH, startM] = startStr.split(':').map(Number);
+        let [endH, endM] = endStr.split(':').map(Number);
 
-        const slotStartMins = startH * 60 + startM;
-        const slotEndMins = endH * 60 + endM;
+        if (endH === 0 && startH === 23) endH = 24;
+
+        let slotStartMins = startH * 60 + startM;
+        let slotEndMins = endH * 60 + endM;
+
+        if (logShift === 'B' && startH < 7) {
+          slotStartMins += 24 * 60;
+          slotEndMins += 24 * 60;
+          if (currentMins < 7 * 60) {
+            currentMins += 24 * 60;
+          }
+        }
+
         const graceEndMins = slotEndMins + 15;
 
         if (currentMins < slotStartMins) {

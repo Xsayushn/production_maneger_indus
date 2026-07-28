@@ -8,6 +8,18 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
+export const SHIFT_A_SLOTS = [
+  '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
+  '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
+  '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
+];
+
+export const SHIFT_B_SLOTS = [
+  '19:00-20:00', '20:00-21:00', '21:00-22:00', '22:00-23:00',
+  '23:00-00:00', '00:00-01:00', '01:00-02:00', '02:00-03:00',
+  '03:00-04:00', '04:00-05:00', '05:00-06:00', '06:00-07:00'
+];
+
 export default function WorkerInterface({ currentUser, workers, parts, machines, lastWsMessage, authFetch }) {
   const [selectedWorker, setSelectedWorker] = useState(currentUser?.name || (workers.length > 0 ? workers[0].name : 'Lavkush'));
   const [selectedMachine, setSelectedMachine] = useState(machines.length > 0 ? machines[0].name : 'M/C 392');
@@ -28,11 +40,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const defaultSlots = [
-    '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00',
-    '11:00-12:00', '12:00-13:00', '13:00-14:00', '14:00-15:00',
-    '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00'
-  ];
+  const activeSlots = shift === 'B' ? SHIFT_B_SLOTS : SHIFT_A_SLOTS;
 
   const apiFetch = authFetch || fetch;
   const todayStr = getLocalDateString();
@@ -61,18 +69,32 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     }
 
     const [startStr, endStr] = timeSlotStr.split('-');
-    const [startH, startM] = startStr.split(':').map(Number);
-    const [endH, endM] = endStr.split(':').map(Number);
+    let [startH, startM] = startStr.split(':').map(Number);
+    let [endH, endM] = endStr.split(':').map(Number);
 
-    const slotStartMins = startH * 60 + startM;
-    const slotEndMins = endH * 60 + endM;
+    if (endH === 0 && startH === 23) endH = 24;
+
+    let slotStartMins = startH * 60 + startM;
+    let slotEndMins = endH * 60 + endM;
+
+    // Overnight slot adjustments for Shift B (00:00 to 07:00 slots)
+    if (shift === 'B' && startH < 7) {
+      slotStartMins += 24 * 60;
+      slotEndMins += 24 * 60;
+      if (currentMins < 7 * 60) {
+        currentMins += 24 * 60;
+      }
+    }
+
     const graceEndMins = slotEndMins + 15;
 
     if (currentMins < slotStartMins) {
       return { editable: false, reason: `Locked (Starts at ${startStr})` };
     }
     if (currentMins > graceEndMins) {
-      const graceTimeStr = `${Math.floor(graceEndMins / 60).toString().padStart(2, '0')}:${(graceEndMins % 60).toString().padStart(2, '0')}`;
+      const graceH = Math.floor(graceEndMins / 60) % 24;
+      const graceM = graceEndMins % 60;
+      const graceTimeStr = `${graceH.toString().padStart(2, '0')}:${graceM.toString().padStart(2, '0')}`;
       return { editable: false, reason: `Expired (Closed at ${graceTimeStr})` };
     }
 
@@ -102,7 +124,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
       if (logsRes.ok) {
         const existingLogs = await logsRes.json();
 
-        const mergedSlots = defaultSlots.map(slot => {
+        const mergedSlots = activeSlots.map(slot => {
           const found = existingLogs.find(l => l.time_slot === slot);
           const plannedFromAssign = assignmentInfo ? assignmentInfo.planned_hourly_qty : 840;
           
@@ -273,9 +295,9 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
             <label className="form-label"><Calendar size={13} style={{ marginRight: '4px' }} /> Date & Shift</label>
             <div style={{ display: 'flex', gap: '0.4rem' }}>
               <input type="date" className="form-control" style={{ flex: 1 }} value={date} onChange={(e) => setDate(e.target.value)} />
-              <select className="form-control" style={{ width: '80px' }} value={shift} onChange={(e) => setShift(e.target.value)}>
-                <option value="A">Shift A</option>
-                <option value="B">Shift B</option>
+              <select className="form-control" style={{ minWidth: '130px' }} value={shift} onChange={(e) => setShift(e.target.value)}>
+                <option value="A">Shift A (07:00-19:00)</option>
+                <option value="B">Shift B (19:00-07:00)</option>
               </select>
             </div>
           </div>
@@ -283,6 +305,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
         {/* Metadata info ribbon */}
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
+          <div><strong style={{ color: 'var(--text-muted)' }}>Active Shift:</strong> <span className="font-mono" style={{ color: 'var(--accent-cyan)' }}>{shift === 'A' ? 'Shift A (7 AM - 7 PM)' : 'Shift B (7 PM - 7 AM)'}</span></div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Tube Spec:</strong> {assignmentInfo?.tube_spec || 'Standard Spec'}</div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Job Number:</strong> {assignmentInfo?.job_number || 'JOB-001'}</div>
           <div><strong style={{ color: 'var(--text-muted)' }}>Target Rate:</strong> <span className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>{logs[0]?.planned_qty || 840} Pcs/Hr</span></div>
@@ -337,7 +360,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
       <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1.2rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Clock size={18} color="var(--accent-cyan)" /> Hourly Production Log Entries
+            <Clock size={18} color="var(--accent-cyan)" /> Hourly Production Log Entries ({shift === 'B' ? 'Shift B: 19:00 - 07:00' : 'Shift A: 07:00 - 19:00'})
           </h3>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             Server Enforcement: Slot Time + 15 mins (or Admin Override Unlock)
