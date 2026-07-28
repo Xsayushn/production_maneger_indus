@@ -550,9 +550,11 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
         let slotStartMins = startH * 60 + startM;
         let slotEndMins = endH * 60 + endM;
 
-        if (logShift === 'B' && startH < 7) {
-          slotStartMins += 24 * 60;
-          slotEndMins += 24 * 60;
+        if (logShift === 'B') {
+          if (startH < 7) {
+            slotStartMins += 24 * 60;
+            slotEndMins += 24 * 60;
+          }
           if (currentMins < 7 * 60) {
             currentMins += 24 * 60;
           }

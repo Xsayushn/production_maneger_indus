@@ -77,10 +77,12 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     let slotStartMins = startH * 60 + startM;
     let slotEndMins = endH * 60 + endM;
 
-    // Overnight slot adjustments for Shift B (00:00 to 07:00 slots)
-    if (shift === 'B' && startH < 7) {
-      slotStartMins += 24 * 60;
-      slotEndMins += 24 * 60;
+    // Overnight slot adjustments for Shift B (19:00 to 07:00 next day)
+    if (shift === 'B') {
+      if (startH < 7) {
+        slotStartMins += 24 * 60;
+        slotEndMins += 24 * 60;
+      }
       if (currentMins < 7 * 60) {
         currentMins += 24 * 60;
       }
