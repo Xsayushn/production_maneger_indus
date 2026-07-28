@@ -8,24 +8,23 @@ const lastNames = [
   'Sharma', 'Verma', 'Singh'
 ];
 
-const departments = [
-  'Hairpin Bending Line A',
-  'Hairpin Bending Line B',
-  'Fin Press Assembly',
-  'Tube Mill & Stamping',
-  'Quality Verification',
-  'Coil Assembly Section'
+export const DEPARTMENTS = [
+  'Fin Press',
+  'Expander',
+  'Punching',
+  'Hairpin'
 ];
 
 const seedData = async () => {
-  console.log('Starting enterprise seed process with Shift A (7 AM - 7 PM) & Shift B (7 PM - 7 AM)...');
+  console.log('Starting enterprise seed process with 4 standard departments (Fin Press, Expander, Punching, Hairpin)...');
 
-  // 1. Generate Workers for Shift A and Shift B
+  // 1. Generate Workers
   const generatedWorkers = [];
   
-  generatedWorkers.push({ name: 'Lavkush', code: 'WRK-1001', department: 'Hairpin Bending Line A', shift: 'A' });
-  generatedWorkers.push({ name: 'Rahul Sharma', code: 'WRK-1002', department: 'Hairpin Bending Line A', shift: 'A' });
-  generatedWorkers.push({ name: 'Amit Verma', code: 'WRK-1003', department: 'Fin Press Assembly', shift: 'B' });
+  generatedWorkers.push({ name: 'Lavkush', code: 'WRK-1001', department: 'Hairpin', shift: 'A' });
+  generatedWorkers.push({ name: 'Rahul Sharma', code: 'WRK-1002', department: 'Fin Press', shift: 'A' });
+  generatedWorkers.push({ name: 'Amit Verma', code: 'WRK-1003', department: 'Expander', shift: 'B' });
+  generatedWorkers.push({ name: 'Priya Singh', code: 'WRK-1004', department: 'Punching', shift: 'B' });
 
   for (const w of generatedWorkers) {
     await run(
@@ -37,8 +36,9 @@ const seedData = async () => {
   // 2. Seed Machines
   const machines = [
     { name: 'M/C 392', code: 'MC-392', line: 'Hairpin Line A' },
-    { name: 'M/C 393', code: 'MC-393', line: 'Hairpin Line A' },
-    { name: 'M/C 401', code: 'MC-401', line: 'Fin Press Line B' }
+    { name: 'M/C 393', code: 'MC-393', line: 'Fin Press Line B' },
+    { name: 'M/C 401', code: 'MC-401', line: 'Expander Line C' },
+    { name: 'M/C 405', code: 'MC-405', line: 'Punching Line D' }
   ];
 
   for (const m of machines) {
@@ -112,7 +112,7 @@ const seedData = async () => {
     }
   }
 
-  console.log('Shift A and Shift B seed completed successfully!');
+  console.log('4 Department seed completed successfully!');
 };
 
 seedData().catch(err => {

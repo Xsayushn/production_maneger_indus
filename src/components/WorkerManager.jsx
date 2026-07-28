@@ -1,6 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Users, Search, Plus, Filter, UserCheck, Shield, Building2, BadgeCheck } from 'lucide-react';
 
+export const STANDARD_DEPARTMENTS = [
+  'Fin Press',
+  'Expander',
+  'Punching',
+  'Hairpin'
+];
+
 export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
@@ -9,16 +16,16 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
   // New Worker Form state
   const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
-  const [newDept, setNewDept] = useState('Hairpin Bending Line A');
+  const [newDept, setNewDept] = useState('Fin Press');
   const [newShift, setNewShift] = useState('A');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const apiFetch = authFetch || fetch;
 
-  // Extract unique departments
+  // Department list (incorporates standard departments + any existing from workers)
   const departments = useMemo(() => {
-    const depts = new Set(workers.map(w => w.department || 'Production Line'));
+    const depts = new Set([...STANDARD_DEPARTMENTS, ...workers.map(w => w.department || 'Fin Press')]);
     return Array.from(depts);
   }, [workers]);
 
@@ -74,10 +81,10 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.2rem' }}>
           <div>
             <h2 style={{ fontSize: '1.3rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Users color="var(--accent-cyan)" size={22} /> Enterprise Worker Roster & Directory (100+)
+              <Users color="var(--accent-cyan)" size={22} /> Enterprise Worker Roster & Directory
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Manage registered shop-floor operators, employee codes, and assigned plant departments
+              Manage registered shop-floor operators across Fin Press, Expander, Punching, and Hairpin departments
             </p>
           </div>
 
@@ -118,38 +125,36 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
       </div>
 
       {/* Roster Summary KPI */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Registered Workers</div>
-          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-cyan)', marginTop: '0.2rem' }}>
-            {workers.length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Employees</span>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Registered Workers</div>
+          <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 800, marginTop: '0.2rem' }}>
+            {workers.length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Operators</span>
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Active Filter Results</div>
-          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-green)', marginTop: '0.2rem' }}>
-            {filteredWorkers.length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Matched</span>
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-green)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Shift A Active Workers</div>
+          <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-green)', marginTop: '0.2rem' }}>
+            {workers.filter(w => w.shift === 'A' || !w.shift).length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Day Shift</span>
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: '1rem' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Plant Departments</div>
-          <div className="font-mono" style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-yellow)', marginTop: '0.2rem' }}>
-            {departments.length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Lines</span>
+        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-blue)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Shift B Active Workers</div>
+          <div className="font-mono" style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-blue)', marginTop: '0.2rem' }}>
+            {workers.filter(w => w.shift === 'B').length} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Night Shift</span>
           </div>
         </div>
       </div>
 
-      {/* Workers Roster Table */}
+      {/* Workers Directory Table */}
       <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1.2rem 1.5rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <UserCheck size={18} color="var(--accent-cyan)" /> Shop-Floor Worker Directory
+            <UserCheck size={18} color="var(--accent-cyan)" /> Plant Worker Directory
           </h3>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Showing {filteredWorkers.length} of {workers.length} workers
-          </span>
+          <span className="badge badge-blue">{filteredWorkers.length} Workers Match</span>
         </div>
 
         <div className="prod-table-container" style={{ border: 'none' }}>
@@ -159,38 +164,55 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
                 <th>Employee Code</th>
                 <th>Worker Name</th>
                 <th>Plant Department</th>
-                <th>Default Shift</th>
-                <th>Role</th>
+                <th>Assigned Shift</th>
+                <th>System Role</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {filteredWorkers.map(w => (
-                <tr key={w.id || w.code}>
-                  <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>
-                    {w.code}
-                  </td>
-                  <td><strong>{w.name}</strong></td>
-                  <td>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <Building2 size={13} color="var(--text-muted)" /> {w.department || 'Production Line'}
-                    </span>
-                  </td>
-                  <td><span className="badge badge-blue">Shift {w.shift || 'A'}</span></td>
-                  <td><span className="badge badge-yellow">{w.role ? w.role.toUpperCase() : 'WORKER'}</span></td>
-                  <td>
-                    <span className="badge badge-green">
-                      <BadgeCheck size={12} /> Active
-                    </span>
+              {filteredWorkers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                    No workers found matching "{searchQuery}" in {selectedDept || 'all departments'}.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredWorkers.map((w, idx) => (
+                  <tr key={idx}>
+                    <td className="font-mono" style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>
+                      {w.code}
+                    </td>
+                    <td>
+                      <strong>{w.name}</strong>
+                    </td>
+                    <td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <Building2 size={13} color="var(--text-muted)" />
+                        {w.department || 'Fin Press'}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${w.shift === 'B' ? 'badge-blue' : 'badge-green'}`}>
+                        Shift {w.shift || 'A'}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ textTransform: 'capitalize', fontSize: '0.85rem' }}>{w.role || 'worker'}</span>
+                    </td>
+                    <td>
+                      <span className={`badge ${w.status === 'active' ? 'badge-green' : 'badge-red'}`}>
+                        <BadgeCheck size={11} /> {w.status || 'active'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Modal: Register New Worker */}
+      {/* Add Worker Modal */}
       {showAddModal && (
         <div style={{
           position: 'fixed',
@@ -244,19 +266,17 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
               <div className="form-group">
                 <label className="form-label">Plant Department</label>
                 <select className="form-control" value={newDept} onChange={(e) => setNewDept(e.target.value)}>
-                  <option value="Hairpin Bending Line A">Hairpin Bending Line A</option>
-                  <option value="Fin Press Assembly">Fin Press Assembly</option>
-                  <option value="Tube Mill & Expander">Tube Mill & Expander</option>
-                  <option value="Quality Verification">Quality Verification</option>
-                  <option value="Final Packaging">Final Packaging</option>
+                  {STANDARD_DEPARTMENTS.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
                 </select>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Shift</label>
                 <select className="form-control" value={newShift} onChange={(e) => setNewShift(e.target.value)}>
-                  <option value="A">Shift A (Morning)</option>
-                  <option value="B">Shift B (Evening)</option>
+                  <option value="A">Shift A (07:00 - 19:00)</option>
+                  <option value="B">Shift B (19:00 - 07:00)</option>
                 </select>
               </div>
 
