@@ -198,7 +198,7 @@ export default function LoginPage({ workers = [], onLogin, siteMode = 'worker' }
                         background: isSelected ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
                         border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid transparent',
                         display: 'flex',
-                        justify: 'space-between',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
                         fontSize: '0.85rem'
                       }}

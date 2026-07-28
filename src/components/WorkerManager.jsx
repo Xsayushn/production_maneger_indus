@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Users, Search, Plus, Filter, UserCheck, Shield, Building2, BadgeCheck } from 'lucide-react';
+import { Users, Search, Plus, UserCheck, Building2, BadgeCheck, Edit2, UserX, UserCheck2 } from 'lucide-react';
 
 export const STANDARD_DEPARTMENTS = [
   'Fin Press',
@@ -20,6 +20,14 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
   const [newShift, setNewShift] = useState('A');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Edit Worker state
+  const [editWorker, setEditWorker] = useState(null);
+  const [editDept, setEditDept] = useState('');
+  const [editShift, setEditShift] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const apiFetch = authFetch || fetch;
 
@@ -70,6 +78,50 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleStatus = async (worker) => {
+    const newStatus = worker.status === 'active' ? 'inactive' : 'active';
+    try {
+      const res = await apiFetch(`/api/workers/${worker.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to update worker status');
+      }
+      setSuccessMsg(`Worker ${worker.name} has been ${newStatus === 'active' ? 'reactivated' : 'deactivated'}.`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+      // Force page reload to reflect changes (since workers prop is managed in App)
+      window.location.reload();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleUpdateWorker = async (e) => {
+    e.preventDefault();
+    setEditLoading(true);
+    setEditError('');
+    try {
+      const res = await apiFetch(`/api/workers/${editWorker.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ department: editDept, shift: editShift })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update worker');
+      setEditWorker(null);
+      setSuccessMsg(`Worker ${editWorker.name} updated successfully.`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+      window.location.reload();
+    } catch (err) {
+      setEditError(err.message);
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -157,6 +209,12 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
           <span className="badge badge-blue">{filteredWorkers.length} Workers Match</span>
         </div>
 
+        {successMsg && (
+          <div style={{ margin: '1rem 1.5rem', background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.85rem' }}>
+            ✓ {successMsg}
+          </div>
+        )}
+
         <div className="prod-table-container" style={{ border: 'none' }}>
           <table className="prod-table">
             <thead>
@@ -167,12 +225,13 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
                 <th>Assigned Shift</th>
                 <th>System Role</th>
                 <th>Status</th>
+                <th style={{ textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredWorkers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                     No workers found matching "{searchQuery}" in {selectedDept || 'all departments'}.
                   </td>
                 </tr>
@@ -203,6 +262,26 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
                       <span className={`badge ${w.status === 'active' ? 'badge-green' : 'badge-red'}`}>
                         <BadgeCheck size={11} /> {w.status || 'active'}
                       </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
+                        <button
+                          onClick={() => { setEditWorker(w); setEditDept(w.department || 'Fin Press'); setEditShift(w.shift || 'A'); setEditError(''); }}
+                          className="btn btn-secondary btn-sm"
+                          title="Edit shift/department"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          <Edit2 size={12} /> Edit
+                        </button>
+                        <button
+                          onClick={() => handleToggleStatus(w)}
+                          className={`btn ${w.status === 'active' ? 'btn-secondary' : 'btn-primary'} btn-sm`}
+                          title={w.status === 'active' ? 'Deactivate worker' : 'Reactivate worker'}
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', color: w.status === 'active' ? 'var(--accent-red)' : undefined }}
+                        >
+                          {w.status === 'active' ? <><UserX size={12} /> Deactivate</> : <><UserCheck2 size={12} /> Activate</>}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -284,6 +363,55 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary">Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
                   {loading ? 'Creating...' : 'Register Worker'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Worker Modal */}
+      {editWorker && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1001, padding: '1rem'
+        }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '420px', padding: '2rem' }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: '1.2rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.8rem' }}>
+              Edit Worker: <span style={{ color: 'var(--accent-cyan)' }}>{editWorker.name}</span>
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Code: {editWorker.code}</p>
+
+            {editError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                {editError}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateWorker} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="form-group">
+                <label className="form-label">Plant Department</label>
+                <select className="form-control" value={editDept} onChange={(e) => setEditDept(e.target.value)}>
+                  {STANDARD_DEPARTMENTS.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Shift</label>
+                <select className="form-control" value={editShift} onChange={(e) => setEditShift(e.target.value)}>
+                  <option value="A">Shift A (07:00 - 19:00)</option>
+                  <option value="B">Shift B (19:00 - 07:00)</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button type="button" onClick={() => setEditWorker(null)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={editLoading}>
+                  {editLoading ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>

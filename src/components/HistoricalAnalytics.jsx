@@ -116,8 +116,9 @@ export default function HistoricalAnalytics({ parts, machines, workers, authFetc
           <div className="form-group">
             <label className="form-label">Year Filter</label>
             <select className="form-control" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)}>
-              <option value="2026">2026</option>
-              <option value="2025">2025</option>
+              {Array.from({ length: 4 }, (_, i) => new Date().getFullYear() - 1 + i).map(y => (
+                <option key={y} value={String(y)}>{y}</option>
+              ))}
               <option value="">All Years</option>
             </select>
           </div>
@@ -134,6 +135,10 @@ export default function HistoricalAnalytics({ parts, machines, workers, authFetc
               <option value="6">June</option>
               <option value="7">July</option>
               <option value="8">August</option>
+              <option value="9">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
             </select>
           </div>
 

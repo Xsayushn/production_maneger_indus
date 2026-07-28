@@ -107,9 +107,10 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
     setLoading(true);
     try {
       const assignRes = await apiFetch(`/api/assignments?date=${date}&shift=${shift}`);
+      let currentAssign = null;
       if (assignRes.ok) {
         const assignments = await assignRes.json();
-        const currentAssign = assignments.find(
+        currentAssign = assignments.find(
           a => a.machine_name === selectedMachine || a.worker_name === selectedWorker
         );
         if (currentAssign) {
@@ -126,7 +127,8 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
 
         const mergedSlots = activeSlots.map(slot => {
           const found = existingLogs.find(l => l.time_slot === slot);
-          const plannedFromAssign = assignmentInfo ? assignmentInfo.planned_hourly_qty : 840;
+          // Use freshly fetched currentAssign, not stale assignmentInfo from closure
+          const plannedFromAssign = currentAssign ? currentAssign.planned_hourly_qty : 840;
           
           return found ? { ...found } : {
             time_slot: slot,
@@ -382,7 +384,16 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
               </tr>
             </thead>
             <tbody>
-              {logs.map((log, index) => {
+              {loading ? (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+                        <div style={{ width: '18px', height: '18px', border: '3px solid var(--border-color)', borderTopColor: 'var(--accent-cyan)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        Loading hourly production data...
+                      </div>
+                    </td>
+                  </tr>
+                ) : logs.map((log, index) => {
                 const planned = parseInt(log.planned_qty) || 0;
                 const produced = parseInt(log.produced_qty) || 0;
                 const pct = planned > 0 ? Math.round((produced / planned) * 100) : 0;

@@ -160,6 +160,18 @@ export default function TargetAllocator({ workers, parts, machines, date, shift,
             </div>
           </div>
 
+          {/* Tube Spec */}
+          <div className="form-group">
+            <label className="form-label">Tube Spec</label>
+            <input 
+              type="text" 
+              className="form-control font-mono" 
+              value={tubeSpec} 
+              onChange={(e) => setTubeSpec(e.target.value)}
+              placeholder="e.g. 0.35mm x 7.0mm"
+            />
+          </div>
+
           {/* Buttons */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
             <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>

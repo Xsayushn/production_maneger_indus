@@ -296,7 +296,13 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
                   </tr>
                 </thead>
                 <tbody>
-                  {hourlyLogs.map((log, idx) => {
+                  {hourlyLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                        No hourly log entries found for Shift {shift} on {date}. Workers need to submit entries first.
+                      </td>
+                    </tr>
+                  ) : hourlyLogs.map((log, idx) => {
                     const pct = log.planned_qty > 0 ? Math.round((log.produced_qty / log.planned_qty) * 100) : 0;
                     const isUnlocked = log.admin_unlocked === 1;
 

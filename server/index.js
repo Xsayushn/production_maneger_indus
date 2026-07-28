@@ -596,7 +596,7 @@ app.get('/api/analytics/historical', authenticateToken, requireAdmin, async (req
       selectGroup = 'CAST(year AS TEXT) AS label, year';
     } else if (period === 'monthly') {
       groupBy = 'year, month';
-      selectGroup = 'year || "-" || LPAD(CAST(month AS TEXT), 2, "0") AS label, year, month';
+      selectGroup = `year || '-' || CASE WHEN month < 10 THEN '0' || CAST(month AS TEXT) ELSE CAST(month AS TEXT) END AS label, year, month`;
     } else if (period === 'weekly') {
       groupBy = 'year, week_number';
       selectGroup = '"W" || week_number || " (" || year || ")" AS label, year, week_number';
