@@ -118,7 +118,7 @@ export const initDb = async () => {
       name VARCHAR(255) NOT NULL,
       code VARCHAR(255) UNIQUE NOT NULL,
       password_hash TEXT,
-      department VARCHAR(255) DEFAULT 'Production Line',
+      department VARCHAR(255) DEFAULT 'Fin Press',
       shift VARCHAR(50) DEFAULT 'A',
       role VARCHAR(50) DEFAULT 'worker',
       status VARCHAR(50) DEFAULT 'active'
@@ -135,16 +135,18 @@ export const initDb = async () => {
     )
   `);
 
-  // Part numbers table
+  // Part numbers table (with stock_quantity column)
   await run(`
     CREATE TABLE IF NOT EXISTS part_numbers (
       id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
       part_number VARCHAR(255) UNIQUE NOT NULL,
       description TEXT,
       tube_spec VARCHAR(255),
-      default_hourly_target INTEGER DEFAULT 840
+      default_hourly_target INTEGER DEFAULT 840,
+      stock_quantity INTEGER DEFAULT 10000
     )
   `);
+  try { await run(`ALTER TABLE part_numbers ADD COLUMN stock_quantity INTEGER DEFAULT 10000`); } catch (e) {}
 
   // Daily/Shift Target Allocations
   await run(`
@@ -163,7 +165,7 @@ export const initDb = async () => {
     )
   `);
 
-  // Hourly production logs
+  // Hourly production logs (with compound unique index on date, shift, time_slot, worker_name)
   await run(`
     CREATE TABLE IF NOT EXISTS hourly_logs (
       id ${usePostgres ? 'SERIAL' : 'INTEGER'} PRIMARY KEY,
@@ -208,6 +210,7 @@ export const initDb = async () => {
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_eval ON hourly_logs(year, month, week_number, date);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_worker ON hourly_logs(worker_name);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_logs_part ON hourly_logs(part_number);`);
+    await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_unq_worker_slot ON hourly_logs(date, shift, time_slot, worker_name);`);
     await run(`CREATE INDEX IF NOT EXISTS idx_unlocks_search ON slot_unlocks(date, shift, time_slot, machine_name, part_number);`);
   } catch (e) {}
 

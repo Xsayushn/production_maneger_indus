@@ -7,9 +7,16 @@ import TargetAllocator from './TargetAllocator.jsx';
 import HistoricalAnalytics from './HistoricalAnalytics.jsx';
 import WorkerManager from './WorkerManager.jsx';
 
+const getLocalDateString = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function AdminDashboard({ workers, parts, machines, lastWsMessage, onWorkerAdded, authFetch }) {
   const [activeTab, setActiveTab] = useState('live'); // 'live' | 'analytics' | 'workers'
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateString());
   const [shift, setShift] = useState('A');
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   
@@ -39,6 +46,10 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
 
   useEffect(() => {
     fetchDashboardData();
+
+    // REST Polling Fallback every 10s (Guarantees dashboard stays active even if WS drops)
+    const interval = setInterval(fetchDashboardData, 10000);
+    return () => clearInterval(interval);
   }, [date, shift]);
 
   // Realtime WS updates trigger re-fetch
@@ -150,7 +161,7 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
             className="table-input" 
             value={shift} 
             onChange={(e) => setShift(e.target.value)} 
-            style={{ width: '90px', padding: '0.35rem 0.6rem' }}
+            style={{ width: '110px', padding: '0.35rem 0.6rem' }}
           >
             <option value="A">Shift A</option>
             <option value="B">Shift B</option>
@@ -296,13 +307,7 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
                   </tr>
                 </thead>
                 <tbody>
-                  {hourlyLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
-                        No hourly log entries found for Shift {shift} on {date}. Workers need to submit entries first.
-                      </td>
-                    </tr>
-                  ) : hourlyLogs.map((log, idx) => {
+                  {hourlyLogs.map((log, idx) => {
                     const pct = log.planned_qty > 0 ? Math.round((log.produced_qty / log.planned_qty) * 100) : 0;
                     const isUnlocked = log.admin_unlocked === 1;
 

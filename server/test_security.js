@@ -75,8 +75,26 @@ async function runSecurityTests() {
     });
     assert(workerApproveRes.status === 403, 'Test 5: Block worker from performing Admin supervisor sign-off with 403 Forbidden');
 
-    // Test 6: Worker attempting out-of-window time slot edit without Admin unlock
+    // Clean up any test unlock record first
     const today = getISTDateString();
+    await fetch(`${BASE_URL}/api/hourly-logs/unlock`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({
+        date: today,
+        shift: 'A',
+        time_slot: '14:00-15:00',
+        part_number: 'CCW2410',
+        machine_name: 'M/C 392',
+        worker_name: 'Lavkush',
+        unlocked: false
+      })
+    });
+
+    // Test 6: Worker attempting out-of-window time slot edit without Admin unlock
     const outOfWindowRes = await fetch(`${BASE_URL}/api/hourly-logs`, {
       method: 'POST',
       headers: {
@@ -86,15 +104,14 @@ async function runSecurityTests() {
       body: JSON.stringify({
         date: today,
         shift: 'A',
-        time_slot: '12:00-13:00', // Time slot past
+        time_slot: '14:00-15:00', // Time slot past
         part_number: 'CCW2410',
         machine_name: 'M/C 392',
         worker_name: 'Lavkush',
         produced_qty: 500
       })
     });
-    const outText = await outOfWindowRes.text();
-    assert(outOfWindowRes.status === 403, 'Test 6: Server enforces +15 min time-lock and rejects out-of-window worker edit with 403 Forbidden', `Status: ${outOfWindowRes.status}, Body: ${outText}`);
+    assert(outOfWindowRes.status === 403, 'Test 6: Server enforces +15 min time-lock and rejects out-of-window worker edit with 403 Forbidden');
 
     // Test 7: Admin granting slot unlock access to worker
     const unlockRes = await fetch(`${BASE_URL}/api/hourly-logs/unlock`, {
@@ -106,7 +123,7 @@ async function runSecurityTests() {
       body: JSON.stringify({
         date: today,
         shift: 'A',
-        time_slot: '12:00-13:00',
+        time_slot: '14:00-15:00',
         part_number: 'CCW2410',
         machine_name: 'M/C 392',
         worker_name: 'Lavkush',
@@ -125,7 +142,7 @@ async function runSecurityTests() {
       body: JSON.stringify({
         date: today,
         shift: 'A',
-        time_slot: '12:00-13:00',
+        time_slot: '14:00-15:00',
         part_number: 'CCW2410',
         machine_name: 'M/C 392',
         worker_name: 'Lavkush',

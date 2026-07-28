@@ -3,6 +3,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
@@ -45,6 +46,15 @@ app.use(
 
 app.use(express.json());
 
+// 3. Rate Limiter for Login Endpoint (Protects against Brute-Force Password Attacks)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 requests per window
+  message: { error: 'Too many authentication attempts. Please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 // ----------------------------------------------------
 // TIMEZONE PRECISION HELPERS (IST - UTC+5:30)
 // Guarantees server date/time matches shop-floor wall clock
@@ -74,7 +84,7 @@ const broadcast = (data) => {
   });
 };
 
-// WebSocket Authentication on Handshake
+// WebSocket Authentication & Heartbeat Ping/Pong
 wss.on('connection', (ws, req) => {
   const urlParams = new URLSearchParams(req.url.split('?')[1]);
   const token = urlParams.get('token');
@@ -91,8 +101,23 @@ wss.on('connection', (ws, req) => {
   }
 
   ws.user = user;
+  ws.isAlive = true;
+
+  ws.on('pong', () => { ws.isAlive = true; });
+
   ws.send(JSON.stringify({ type: 'CONNECTED', message: `Authenticated connection active for ${user.name}` }));
 });
+
+// WS Heartbeat Interval to keep connection alive on cloud hosts
+const wsHeartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => clearInterval(wsHeartbeatInterval));
 
 // Initialize DB schema on start
 await initDb();
@@ -124,8 +149,8 @@ app.get('/api/auth/public-workers', async (req, res) => {
   }
 });
 
-// Server-side Authentication (Admin & Worker Login)
-app.post('/api/auth/login', async (req, res) => {
+// Server-side Authentication (Admin & Worker Login with Rate Limiting)
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
     const { role, username, password, workerCode, workerName } = req.body;
 
@@ -229,11 +254,11 @@ app.get('/api/workers', authenticateToken, async (req, res) => {
   }
 });
 
-// Create Worker (Protected by Admin Role)
+// Create Worker (Protected by Admin Role & Zod Validation)
 app.post('/api/workers', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const schema = z.object({
-      name: z.string().min(2),
+      name: z.string().min(2, 'Name must be at least 2 characters'),
       code: z.string().min(2).optional(),
       department: z.string().optional(),
       shift: z.string().optional()
@@ -244,24 +269,30 @@ app.post('/api/workers', authenticateToken, requireAdmin, async (req, res) => {
 
     const result = await run(
       `INSERT INTO workers (name, code, department, shift, role, status) VALUES (?, ?, ?, ?, 'worker', 'active')`,
-      [parsed.name, workerCode, parsed.department || 'Production Line', parsed.shift || 'A']
+      [parsed.name, workerCode, parsed.department || 'Fin Press', parsed.shift || 'A']
     );
     res.json({ id: result.id, name: parsed.name, code: workerCode, department: parsed.department, shift: parsed.shift, status: 'active' });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.errors ? err.errors.map(e => e.message).join(', ') : err.message });
   }
 });
 
-// Update Worker Status / Dept / Shift (Protected by Admin Role)
+// Update Worker Status / Dept / Shift (Protected by Admin Role & Zod Validation)
 app.put('/api/workers/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const schema = z.object({
+      status: z.enum(['active', 'inactive']).optional(),
+      department: z.string().optional(),
+      shift: z.string().optional()
+    });
+    const parsed = schema.parse(req.body);
+
     const { id } = req.params;
-    const { status, department, shift } = req.body;
-    await run(`UPDATE workers SET status = COALESCE(?, status), department = COALESCE(?, department), shift = COALESCE(?, shift) WHERE id = ?`, [status, department, shift, id]);
+    await run(`UPDATE workers SET status = COALESCE(?, status), department = COALESCE(?, department), shift = COALESCE(?, shift) WHERE id = ?`, [parsed.status, parsed.department, parsed.shift, id]);
     const updated = await get(`SELECT id, name, code, department, shift, role, status FROM workers WHERE id = ?`, [id]);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.errors ? err.errors.map(e => e.message).join(', ') : err.message });
   }
 });
 
@@ -275,17 +306,25 @@ app.get('/api/parts', authenticateToken, async (req, res) => {
   }
 });
 
-// Create Part Number (Protected by Admin Role)
+// Create Part Number (Protected by Admin Role & Zod Validation)
 app.post('/api/parts', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { part_number, description, tube_spec, default_hourly_target } = req.body;
+    const schema = z.object({
+      part_number: z.string().min(2, 'Part number is required'),
+      description: z.string().optional(),
+      tube_spec: z.string().optional(),
+      default_hourly_target: z.number().min(1).optional(),
+      stock_quantity: z.number().nonnegative().optional()
+    });
+
+    const parsed = schema.parse(req.body);
     const result = await run(
-      `INSERT INTO part_numbers (part_number, description, tube_spec, default_hourly_target) VALUES (?, ?, ?, ?)`,
-      [part_number, description || '', tube_spec || '', Math.max(1, parseInt(default_hourly_target) || 840)]
+      `INSERT INTO part_numbers (part_number, description, tube_spec, default_hourly_target, stock_quantity) VALUES (?, ?, ?, ?, ?)`,
+      [parsed.part_number, parsed.description || '', parsed.tube_spec || '', Math.max(1, parseInt(parsed.default_hourly_target) || 840), parsed.stock_quantity || 10000]
     );
-    res.json({ id: result.id, part_number, description, tube_spec, default_hourly_target });
+    res.json({ id: result.id, ...parsed });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.errors ? err.errors.map(e => e.message).join(', ') : err.message });
   }
 });
 
@@ -320,7 +359,7 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
   }
 });
 
-// Create or Update Target Assignment (Protected by Admin Role)
+// Create or Update Target Assignment with Real Stock Deductions (P0 Fix)
 app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const schema = z.object({
@@ -337,6 +376,19 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
     const body = schema.parse(req.body);
     const targetDate = body.date || getISTDateString();
     const targetShift = body.shift || 'A';
+    const totalShiftRequirement = body.planned_hourly_qty * 12;
+
+    // STOCK MANAGEMENT CHECK & DECREMENT (P0 Fix)
+    const part = await get(`SELECT stock_quantity FROM part_numbers WHERE part_number = ?`, [body.part_number]);
+    if (part) {
+      if (part.stock_quantity < totalShiftRequirement) {
+        return res.status(400).json({ 
+          error: `Insufficient Inventory: Part ${body.part_number} has ${part.stock_quantity} units in stock, but Shift ${targetShift} requires ${totalShiftRequirement} units.` 
+        });
+      }
+      // Decrement stock quantity upon allocation
+      await run(`UPDATE part_numbers SET stock_quantity = stock_quantity - ? WHERE part_number = ?`, [totalShiftRequirement, body.part_number]);
+    }
 
     await run(
       `INSERT INTO assignments (date, shift, worker_name, part_number, machine_name, planned_hourly_qty, tube_spec, job_number)
@@ -370,9 +422,9 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
     };
     broadcast(payload);
 
-    res.json({ message: 'Target assigned successfully', data: payload.data });
+    res.json({ message: 'Target assigned successfully & stock decremented', data: payload.data });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.errors ? err.errors.map(e => e.message).join(', ') : err.message });
   }
 });
 
@@ -482,13 +534,11 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
       );
 
       if (!adminUnlockRecord) {
-        // Evaluate today's date in Indian Standard Time (IST)
         const todayStr = getISTDateString();
         if (logDate !== todayStr) {
           return res.status(403).json({ error: 'Security Violation: Production records can only be updated for today.' });
         }
 
-        // Evaluate current minutes in Indian Standard Time (IST)
         let currentMins = getISTMinutes();
 
         const [startStr, endStr] = body.time_slot.split('-');
@@ -551,7 +601,7 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
 
     res.json(updatedLog);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.errors ? err.errors.map(e => e.message).join(', ') : err.message });
   }
 });
 

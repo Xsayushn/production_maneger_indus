@@ -1,259 +1,191 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Wrench, Shield, User, ArrowRight, Lock, Search, Building2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Shield, KeyRound, UserCheck, AlertCircle, Wrench, Search } from 'lucide-react';
 
-export default function LoginPage({ workers = [], onLogin, siteMode = 'worker' }) {
-  const [adminUsername, setAdminUsername] = useState('admin');
-  const [adminPassword, setAdminPassword] = useState('admin123');
-  
-  // Local worker list fallback if prop is loading
-  const [localWorkers, setLocalWorkers] = useState(workers);
-  
-  // Searchable worker state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedWorkerObj, setSelectedWorkerObj] = useState(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function LoginPage({ siteMode = 'worker', publicWorkers = [], onLogin, loading, error }) {
+  // Un-prefill credentials for security compliance
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
 
-  // Keep localWorkers updated when workers prop arrives
-  useEffect(() => {
-    if (workers && workers.length > 0) {
-      setLocalWorkers(workers);
-    } else if (siteMode === 'worker') {
-      fetch('/api/auth/public-workers')
-        .then(res => res.ok ? res.json() : [])
-        .then(data => {
-          if (data && data.length > 0) setLocalWorkers(data);
-        })
-        .catch(err => console.error('Public worker list fetch error:', err));
-    }
-  }, [workers, siteMode]);
+  // Worker login state
+  const [selectedWorkerCode, setSelectedWorkerCode] = useState('');
+  const [workerSearch, setWorkerSearch] = useState('');
 
-  // Filter workers dynamically as user types
-  const filteredWorkers = useMemo(() => {
-    const list = localWorkers.length > 0 ? localWorkers : workers;
-    if (!searchQuery.trim()) return list.slice(0, 15);
-    const q = searchQuery.toLowerCase();
-    return list.filter(
-      w => w.name.toLowerCase().includes(q) || w.code.toLowerCase().includes(q) || (w.department && w.department.toLowerCase().includes(q))
-    ).slice(0, 25);
-  }, [searchQuery, localWorkers, workers]);
+  const filteredWorkers = publicWorkers.filter(w => 
+    w.name.toLowerCase().includes(workerSearch.toLowerCase()) || 
+    w.code.toLowerCase().includes(workerSearch.toLowerCase())
+  );
 
-  const handleAdminSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          role: 'admin',
-          username: adminUsername,
-          password: adminPassword
-        })
+    if (siteMode === 'admin') {
+      onLogin({
+        role: 'admin',
+        username: adminUsername,
+        password: adminPassword
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Admin login failed');
-
-      onLogin(data.user, data.token);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    } else {
+      const selectedWorker = publicWorkers.find(w => w.code === selectedWorkerCode);
+      onLogin({
+        role: 'worker',
+        workerCode: selectedWorkerCode,
+        workerName: selectedWorker ? selectedWorker.name : workerSearch
+      });
     }
   };
-
-  const handleWorkerSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const targetWorker = selectedWorkerObj || (filteredWorkers.length > 0 ? filteredWorkers[0] : null);
-      if (!targetWorker && !searchQuery.trim()) {
-        throw new Error('Please select or enter a valid Worker Name / Employee Code');
-      }
-
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          role: 'worker',
-          workerCode: targetWorker ? targetWorker.code : searchQuery,
-          workerName: targetWorker ? targetWorker.name : searchQuery
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Worker login failed');
-
-      onLogin(data.user, data.token);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isAdminSite = siteMode === 'admin';
 
   return (
     <div style={{
-      minHeight: '100vh',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'radial-gradient(circle at top, #1e293b 0%, #0f172a 100%)',
-      padding: '1.5rem'
+      minHeight: '80vh',
+      padding: '1rem'
     }}>
-      <div className="glass-panel" style={{ width: '100%', maxWidth: '480px', padding: '2.5rem 2rem' }}>
+      <div className="glass-panel" style={{
+        width: '100%',
+        maxWidth: '460px',
+        padding: '2.5rem',
+        borderTop: siteMode === 'admin' ? '4px solid var(--accent-purple)' : '4px solid var(--accent-cyan)'
+      }}>
         
-        {/* Brand Header */}
+        {/* Header Branding */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{
-            background: isAdminSite 
-              ? 'linear-gradient(135deg, var(--accent-blue), #8b5cf6)' 
-              : 'linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))',
-            width: '54px',
-            height: '54px',
+            width: '56px',
+            height: '56px',
             borderRadius: '14px',
+            background: siteMode === 'admin' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(6, 182, 212, 0.15)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            margin: '0 auto 1rem',
-            boxShadow: isAdminSite 
-              ? '0 8px 20px rgba(139, 92, 246, 0.4)' 
-              : '0 8px 20px rgba(6, 182, 212, 0.4)'
+            margin: '0 auto 1rem auto',
+            border: siteMode === 'admin' ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(6, 182, 212, 0.3)'
           }}>
-            {isAdminSite ? <Shield color="white" size={28} /> : <Wrench color="white" size={28} />}
+            {siteMode === 'admin' ? (
+              <Shield color="var(--accent-purple)" size={28} />
+            ) : (
+              <Wrench color="var(--accent-cyan)" size={28} />
+            )}
           </div>
-
-          <h1 style={{ fontSize: '1.35rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
-            {isAdminSite ? 'INDUS MANAGEMENT CENTER' : 'INDUS SHOP-FLOOR TERMINAL'}
+          
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 800, tracking: '-0.02em', marginBottom: '0.3rem' }}>
+            {siteMode === 'admin' ? 'INDUS MANAGEMENT CENTER' : 'INDUS SHOP-FLOOR TERMINAL'}
           </h1>
-          <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-            {isAdminSite ? 'Executive Admin Operations Portal' : 'Hourly Production Verification Portal'}
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            {siteMode === 'admin' ? 'Executive Admin Operations Portal' : 'Hourly Production Verification Portal'}
           </p>
         </div>
 
+        {/* Error Alert */}
         {error && (
           <div style={{
-            background: 'rgba(239, 68, 68, 0.2)',
+            background: 'rgba(239, 68, 68, 0.15)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
             color: '#f87171',
-            border: '1px solid rgba(239, 68, 68, 0.4)',
-            padding: '0.75rem',
-            borderRadius: '8px',
-            marginBottom: '1.2rem',
+            padding: '0.85rem 1rem',
+            borderRadius: '10px',
+            marginBottom: '1.5rem',
             fontSize: '0.85rem',
-            textAlign: 'center'
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem'
           }}>
-            {error}
+            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Worker Site Login Form (Rendered on /) */}
-        {!isAdminSite ? (
-          <form onSubmit={handleWorkerSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-            <div className="form-group">
-              <label className="form-label">Search Worker Name or Employee Code</label>
-              <div style={{ position: 'relative' }}>
-                <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+        {/* Form Body */}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+          
+          {siteMode === 'admin' ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">Admin Username</label>
                 <input
                   type="text"
                   className="form-control"
-                  style={{ paddingLeft: '36px' }}
-                  placeholder="e.g. Lavkush, WRK-1001, Rahul..."
-                  value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setSelectedWorkerObj(null);
-                  }}
-                  required={!selectedWorkerObj}
+                  value={adminUsername}
+                  onChange={(e) => setAdminUsername(e.target.value)}
+                  placeholder="Enter admin username..."
+                  required
                 />
               </div>
-            </div>
 
-            {/* Quick Auto-complete Suggestions */}
-            <div style={{ maxHeight: '210px', overflowY: 'auto', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '2px', padding: '4px' }}>
-              {filteredWorkers.length === 0 ? (
-                <div style={{ padding: '0.8rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  {localWorkers.length === 0 ? 'Loading worker roster...' : 'No matching worker found. Type your employee code.'}
+              <div className="form-group">
+                <label className="form-label">Password</label>
+                <input
+                  type="password"
+                  className="form-control"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="Enter admin password..."
+                  required
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="form-group">
+                <label className="form-label">Search Worker Name or Employee Code</label>
+                <div style={{ position: 'relative', marginBottom: '0.6rem' }}>
+                  <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    style={{ paddingLeft: '36px' }}
+                    placeholder="e.g. Lavkush, WRK-1001, Rahul..."
+                    value={workerSearch}
+                    onChange={(e) => setWorkerSearch(e.target.value)}
+                  />
                 </div>
-              ) : (
-                filteredWorkers.map(w => {
-                  const isSelected = selectedWorkerObj?.code === w.code;
-                  return (
-                    <div
-                      key={w.id || w.code}
-                      onClick={() => {
-                        setSelectedWorkerObj(w);
-                        setSearchQuery(`${w.name} (${w.code})`);
-                      }}
-                      style={{
-                        padding: '0.55rem 0.8rem',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        background: isSelected ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
-                        border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid transparent',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        fontSize: '0.85rem'
-                      }}
-                    >
-                      <div>
-                        <strong style={{ color: isSelected ? 'var(--accent-cyan)' : 'var(--text-main)' }}>{w.name}</strong>
-                        <span className="font-mono" style={{ marginLeft: '8px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>{w.code}</span>
-                      </div>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                        <Building2 size={11} /> {w.department || 'Line A'}
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }} disabled={loading}>
-              {loading ? 'Authenticating...' : 'Access Shop-Floor Verification'} <ArrowRight size={18} />
-            </button>
-          </form>
-        ) : (
-          /* Admin Site Login Form (Rendered strictly on /admin) */
-          <form onSubmit={handleAdminSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-            <div className="form-group">
-              <label className="form-label">Admin Username</label>
-              <input
-                type="text"
-                className="form-control"
-                value={adminUsername}
-                onChange={(e) => setAdminUsername(e.target.value)}
-                required
-              />
-            </div>
+                <select 
+                  className="form-control"
+                  value={selectedWorkerCode}
+                  onChange={(e) => setSelectedWorkerCode(e.target.value)}
+                  size={5}
+                  style={{ height: '140px' }}
+                  required
+                >
+                  {filteredWorkers.length === 0 ? (
+                    <option disabled>No matching active workers found</option>
+                  ) : (
+                    filteredWorkers.map(w => (
+                      <option key={w.id || w.code} value={w.code} style={{ padding: '0.4rem' }}>
+                        {w.name} ({w.code} - {w.department})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </>
+          )}
 
-            <div className="form-group">
-              <label className="form-label">Password</label>
-              <input
-                type="password"
-                className="form-control"
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
-                required
-              />
-            </div>
+          <button
+            type="submit"
+            className={`btn ${siteMode === 'admin' ? 'btn-primary' : 'btn-primary'}`}
+            disabled={loading || (siteMode === 'worker' && !selectedWorkerCode && !workerSearch)}
+            style={{
+              marginTop: '0.5rem',
+              padding: '0.85rem',
+              fontSize: '0.95rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            {siteMode === 'admin' ? <KeyRound size={18} /> : <UserCheck size={18} />}
+            {loading ? 'Authenticating...' : siteMode === 'admin' ? 'Sign In to Management Center' : 'Access Shop-Floor Verification'}
+          </button>
+        </form>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '0.8rem', fontSize: '1rem', marginTop: '0.5rem' }} disabled={loading}>
-              <Lock size={18} /> {loading ? 'Verifying...' : 'Sign In to Management Center'}
-            </button>
-          </form>
-        )}
-
-        <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Indus Industrial System &bull; Dedicated {isAdminSite ? 'Admin Management' : 'Shop-Floor'} Portal
+        <div style={{ textAlign: 'center', marginTop: '1.8rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          Indus Industrial System • Dedicated {siteMode === 'admin' ? 'Admin Management' : 'Shop-Floor'} Portal
         </div>
+
       </div>
     </div>
   );

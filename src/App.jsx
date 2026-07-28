@@ -28,6 +28,9 @@ export default function App() {
     return localStorage.getItem(key) || '';
   });
 
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
   // Update session state when route changes between / and /admin
   useEffect(() => {
     const keyUser = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
@@ -38,6 +41,7 @@ export default function App() {
 
     setCurrentUser(savedUser ? JSON.parse(savedUser) : null);
     setAuthToken(savedToken || '');
+    setLoginError('');
   }, [isAdminSite]);
 
   const [theme, setTheme] = useState('dark');
@@ -66,7 +70,7 @@ export default function App() {
     }
   }, [isAdminSite]);
 
-  // Authenticated API Helper
+  // Authenticated API Helper (Attaches Bearer Token to Headers)
   const authFetch = async (url, options = {}) => {
     const headers = {
       'Content-Type': 'application/json',
@@ -106,13 +110,32 @@ export default function App() {
   }, [authToken]);
 
   // Handle Login Event
-  const handleLogin = (user, token) => {
-    setCurrentUser(user);
-    setAuthToken(token);
-    const keyUser = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
-    const keyToken = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
-    localStorage.setItem(keyUser, JSON.stringify(user));
-    localStorage.setItem(keyToken, token);
+  const handleLogin = async (credentials) => {
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Authentication failed. Please check credentials.');
+      }
+
+      setCurrentUser(data.user);
+      setAuthToken(data.token);
+      const keyUser = isAdminSite ? 'indus_admin_user' : 'indus_worker_user';
+      const keyToken = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
+      localStorage.setItem(keyUser, JSON.stringify(data.user));
+      localStorage.setItem(keyToken, data.token);
+    } catch (err) {
+      setLoginError(err.message);
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
   // Handle Logout Event
@@ -130,36 +153,48 @@ export default function App() {
     setWorkers(prev => [...prev, newWorker]);
   };
 
-  // Authenticated WebSocket Connection
+  // Authenticated WebSocket Connection with Auto-Reconnect Timer (P0 Fix)
   useEffect(() => {
     if (!authToken) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws?token=${authToken}`;
-    let ws;
+    let ws = null;
+    let reconnectTimeout = null;
 
     const connectWs = () => {
-      ws = new WebSocket(wsUrl);
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws?token=${authToken}`;
+      
+      try {
+        ws = new WebSocket(wsUrl);
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          setLastWsMessage(msg);
-        } catch (e) {
-          console.error('Error parsing WS message', e);
-        }
-      };
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            setLastWsMessage(msg);
+          } catch (e) {
+            console.error('Error parsing WS message', e);
+          }
+        };
 
-      ws.onclose = (event) => {
-        if (event.code !== 4001 && event.code !== 4002) {
-          setTimeout(connectWs, 3000);
-        }
-      };
+        ws.onclose = (event) => {
+          if (event.code !== 4001 && event.code !== 4002) {
+            // Auto reconnect every 3 seconds if connection drops or cloud proxy times out
+            reconnectTimeout = setTimeout(connectWs, 3000);
+          }
+        };
+
+        ws.onerror = (err) => {
+          console.warn('WebSocket connection warning:', err);
+        };
+      } catch (e) {
+        reconnectTimeout = setTimeout(connectWs, 3000);
+      }
     };
 
     connectWs();
 
     return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
   }, [authToken]);
@@ -173,7 +208,15 @@ export default function App() {
 
   // Render Login Page if unauthenticated on current site
   if (!currentUser || !authToken || (isAdminSite && currentUser.role !== 'admin')) {
-    return <LoginPage workers={workers} onLogin={handleLogin} siteMode={isAdminSite ? 'admin' : 'worker'} />;
+    return (
+      <LoginPage 
+        siteMode={isAdminSite ? 'admin' : 'worker'}
+        publicWorkers={workers} 
+        onLogin={handleLogin}
+        loading={loginLoading}
+        error={loginError}
+      />
+    );
   }
 
   return (
