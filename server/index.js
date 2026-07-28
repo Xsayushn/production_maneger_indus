@@ -514,7 +514,7 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
       machine_name: z.string(),
       worker_name: z.string(),
       planned_qty: z.number().nonnegative().optional(),
-      produced_qty: z.number().nonnegative(),
+      produced_qty: z.number().nonnegative().max(50000, 'Produced quantity cannot exceed 50,000 per slot'),
       remarks: z.string().optional()
     });
 
@@ -661,13 +661,13 @@ app.get('/api/analytics/historical', authenticateToken, requireAdmin, async (req
 
     if (period === 'yearly') {
       groupBy = 'year';
-      selectGroup = 'CAST(year AS TEXT) AS label, year';
+      selectGroup = 'CAST(year AS VARCHAR) AS label, year';
     } else if (period === 'monthly') {
       groupBy = 'year, month';
-      selectGroup = `year || '-' || CASE WHEN month < 10 THEN '0' || CAST(month AS TEXT) ELSE CAST(month AS TEXT) END AS label, year, month`;
+      selectGroup = `CAST(year AS VARCHAR) || '-' || CASE WHEN month < 10 THEN '0' || CAST(month AS VARCHAR) ELSE CAST(month AS VARCHAR) END AS label, year, month`;
     } else if (period === 'weekly') {
       groupBy = 'year, week_number';
-      selectGroup = '"W" || week_number || " (" || year || ")" AS label, year, week_number';
+      selectGroup = `'W' || CAST(week_number AS VARCHAR) || ' (' || CAST(year AS VARCHAR) || ')' AS label, year, week_number`;
     } else if (period === 'hourly') {
       groupBy = 'time_slot';
       selectGroup = 'time_slot AS label, time_slot';
@@ -678,7 +678,7 @@ app.get('/api/analytics/historical', authenticateToken, requireAdmin, async (req
         ${selectGroup},
         SUM(planned_qty) as total_planned,
         SUM(produced_qty) as total_produced,
-        ROUND(CASE WHEN SUM(planned_qty) > 0 THEN (CAST(SUM(produced_qty) AS FLOAT) / SUM(planned_qty)) * 100 ELSE 0 END, 1) as efficiency_percent,
+        ROUND(CAST(CASE WHEN SUM(planned_qty) > 0 THEN (CAST(SUM(produced_qty) AS NUMERIC) / SUM(planned_qty)) * 100 ELSE 0 END AS NUMERIC), 1) as efficiency_percent,
         COUNT(DISTINCT date) as active_days,
         COUNT(id) as total_hours_recorded
       FROM hourly_logs
@@ -693,7 +693,7 @@ app.get('/api/analytics/historical', authenticateToken, requireAdmin, async (req
       SELECT 
         SUM(planned_qty) as grand_planned,
         SUM(produced_qty) as grand_produced,
-        ROUND(CASE WHEN SUM(planned_qty) > 0 THEN (CAST(SUM(produced_qty) AS FLOAT) / SUM(planned_qty)) * 100 ELSE 0 END, 1) as grand_efficiency,
+        ROUND(CAST(CASE WHEN SUM(planned_qty) > 0 THEN (CAST(SUM(produced_qty) AS NUMERIC) / SUM(planned_qty)) * 100 ELSE 0 END AS NUMERIC), 1) as grand_efficiency,
         COUNT(DISTINCT date) as total_days_worked,
         COUNT(DISTINCT worker_name) as total_workers_active,
         COUNT(DISTINCT part_number) as total_parts_produced

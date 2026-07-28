@@ -449,6 +449,7 @@ export default function WorkerInterface({ currentUser, workers, parts, machines,
                         onChange={(e) => handleInputChange(index, 'produced_qty', e.target.value)}
                         placeholder="0"
                         min="0"
+                        max="50000"
                         disabled={!timeStatus.editable}
                         style={{ 
                           borderColor: produced > 0 ? 'var(--accent-green)' : 'var(--border-color)',
