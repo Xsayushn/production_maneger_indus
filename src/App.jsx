@@ -73,14 +73,17 @@ export default function App() {
 
   // Authenticated API Helper (Attaches Bearer Token to Headers)
   const authFetch = async (url, options = {}) => {
+    const keyToken = isAdminSite ? 'indus_admin_token' : 'indus_worker_token';
+    const activeToken = authToken || localStorage.getItem(keyToken) || '';
+
     const headers = {
       'Content-Type': 'application/json',
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
       ...(options.headers || {})
     };
 
     const res = await fetch(url, { ...options, headers });
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       handleLogout();
     }
     return res;

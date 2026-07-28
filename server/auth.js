@@ -2,21 +2,16 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { get } from './db.js';
 
-// Random fallback secret generated per server startup if env var isn't set (prevents static secret forgery)
-const RANDOM_DEV_SECRET = crypto.randomBytes(32).toString('hex');
-const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? process.env.JWT_SECRET : RANDOM_DEV_SECRET);
-
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
-  console.warn('⚠️ WARNING: JWT_SECRET is not set in production environment variables! Generated ephemeral secret for startup security.');
-}
+const DEFAULT_JWT_SECRET = 'indus_production_jwt_secret_key_2026_industrial';
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
 
 export const generateToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET || RANDOM_DEV_SECRET, { expiresIn: '12h' });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 };
 
 export const verifyToken = (token) => {
   try {
-    return jwt.verify(token, JWT_SECRET || RANDOM_DEV_SECRET);
+    return jwt.verify(token, JWT_SECRET);
   } catch (err) {
     return null;
   }

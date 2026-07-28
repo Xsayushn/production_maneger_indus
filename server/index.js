@@ -26,7 +26,9 @@ const io = new Server(server, {
     methods: ['GET', 'POST']
   },
   transports: ['polling', 'websocket'],
-  allowEIO3: true
+  allowEIO3: true,
+  pingInterval: 10000,
+  pingTimeout: 5000
 });
 
 // 1. Security Headers via Helmet
