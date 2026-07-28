@@ -18,6 +18,9 @@ export const DEPARTMENTS = [
 const seedData = async () => {
   console.log('Starting enterprise seed process with 4 standard departments (Fin Press, Expander, Punching, Hairpin)...');
 
+  // Fix Bug #2: Initialize database schema first before inserting tables
+  await initDb();
+
   // 1. Generate Workers
   const generatedWorkers = [];
   

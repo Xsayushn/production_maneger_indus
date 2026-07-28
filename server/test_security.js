@@ -2,6 +2,15 @@
 
 const BASE_URL = 'http://localhost:5000';
 
+const getISTDateString = (d = new Date()) => {
+  const utcMs = d.getTime() + (d.getTimezoneOffset() * 60000);
+  const istDate = new Date(utcMs + (330 * 60000));
+  const year = istDate.getFullYear();
+  const month = String(istDate.getMonth() + 1).padStart(2, '0');
+  const day = String(istDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 async function runSecurityTests() {
   console.log('--------------------------------------------------');
   console.log('🔒 RUNNING AUTOMATED SECURITY SUITE & AUDIT VERIFICATION');
@@ -67,7 +76,7 @@ async function runSecurityTests() {
     assert(workerApproveRes.status === 403, 'Test 5: Block worker from performing Admin supervisor sign-off with 403 Forbidden');
 
     // Test 6: Worker attempting out-of-window time slot edit without Admin unlock
-    const today = new Date().toISOString().split('T')[0];
+    const today = getISTDateString();
     const outOfWindowRes = await fetch(`${BASE_URL}/api/hourly-logs`, {
       method: 'POST',
       headers: {
@@ -84,7 +93,8 @@ async function runSecurityTests() {
         produced_qty: 500
       })
     });
-    assert(outOfWindowRes.status === 403, 'Test 6: Server enforces +15 min time-lock and rejects out-of-window worker edit with 403 Forbidden');
+    const outText = await outOfWindowRes.text();
+    assert(outOfWindowRes.status === 403, 'Test 6: Server enforces +15 min time-lock and rejects out-of-window worker edit with 403 Forbidden', `Status: ${outOfWindowRes.status}, Body: ${outText}`);
 
     // Test 7: Admin granting slot unlock access to worker
     const unlockRes = await fetch(`${BASE_URL}/api/hourly-logs/unlock`, {

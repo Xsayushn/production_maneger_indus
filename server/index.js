@@ -45,6 +45,25 @@ app.use(
 
 app.use(express.json());
 
+// ----------------------------------------------------
+// TIMEZONE PRECISION HELPERS (IST - UTC+5:30)
+// Guarantees server date/time matches shop-floor wall clock
+// ----------------------------------------------------
+export const getISTDateString = (d = new Date()) => {
+  const utcMs = d.getTime() + (d.getTimezoneOffset() * 60000);
+  const istDate = new Date(utcMs + (330 * 60000));
+  const year = istDate.getFullYear();
+  const month = String(istDate.getMonth() + 1).padStart(2, '0');
+  const day = String(istDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const getISTMinutes = (d = new Date()) => {
+  const utcMs = d.getTime() + (d.getTimezoneOffset() * 60000);
+  const istDate = new Date(utcMs + (330 * 60000));
+  return istDate.getHours() * 60 + istDate.getMinutes();
+};
+
 // Broadcast function to notify connected, authenticated WebSocket clients
 const broadcast = (data) => {
   const message = JSON.stringify(data);
@@ -233,7 +252,7 @@ app.post('/api/workers', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// Update Worker Status (Protected by Admin Role)
+// Update Worker Status / Dept / Shift (Protected by Admin Role)
 app.put('/api/workers/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -284,7 +303,7 @@ app.get('/api/machines', authenticateToken, async (req, res) => {
 app.get('/api/assignments', authenticateToken, async (req, res) => {
   try {
     const { date, shift } = req.query;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || getISTDateString();
     
     let sql = `SELECT * FROM assignments WHERE date = ?`;
     let params = [targetDate];
@@ -316,7 +335,7 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
     });
 
     const body = schema.parse(req.body);
-    const targetDate = body.date || new Date().toISOString().split('T')[0];
+    const targetDate = body.date || getISTDateString();
     const targetShift = body.shift || 'A';
 
     await run(
@@ -361,7 +380,7 @@ app.post('/api/assignments', authenticateToken, requireAdmin, async (req, res) =
 app.get('/api/hourly-logs', authenticateToken, async (req, res) => {
   try {
     const { date, part_number, machine_name, worker_name, shift } = req.query;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || getISTDateString();
 
     let sql = `
       SELECT h.*, 
@@ -406,7 +425,7 @@ app.get('/api/hourly-logs', authenticateToken, async (req, res) => {
 app.post('/api/hourly-logs/unlock', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { date, shift, time_slot, machine_name, part_number, worker_name, unlocked } = req.body;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || getISTDateString();
     const targetShift = shift || 'A';
 
     if (unlocked) {
@@ -436,7 +455,7 @@ app.post('/api/hourly-logs/unlock', authenticateToken, requireAdmin, async (req,
   }
 });
 
-// SERVER-SIDE TIME LOCK ENFORCEMENT & ENTRY SAVING (Protected by Auth)
+// SERVER-SIDE TIME LOCK ENFORCEMENT & ENTRY SAVING (Protected by Auth & IST Timezone)
 app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
   try {
     const schema = z.object({
@@ -452,7 +471,7 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
     });
 
     const body = schema.parse(req.body);
-    const logDate = body.date || new Date().toISOString().split('T')[0];
+    const logDate = body.date || getISTDateString();
     const logShift = body.shift || 'A';
 
     // SERVER-SIDE TIME-LOCK VALIDATION (+15 Minutes Grace Period Rule or Admin Unlock Override)
@@ -463,13 +482,14 @@ app.post('/api/hourly-logs', authenticateToken, async (req, res) => {
       );
 
       if (!adminUnlockRecord) {
-        const todayStr = new Date().toISOString().split('T')[0];
+        // Evaluate today's date in Indian Standard Time (IST)
+        const todayStr = getISTDateString();
         if (logDate !== todayStr) {
           return res.status(403).json({ error: 'Security Violation: Production records can only be updated for today.' });
         }
 
-        const now = new Date();
-        let currentMins = now.getHours() * 60 + now.getMinutes();
+        // Evaluate current minutes in Indian Standard Time (IST)
+        let currentMins = getISTMinutes();
 
         const [startStr, endStr] = body.time_slot.split('-');
         let [startH, startM] = startStr.split(':').map(Number);
@@ -672,5 +692,5 @@ if (fs.existsSync(distPath)) {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`Production Management Server running on port ${PORT}`);
+  console.log(`Production Management Server running on port ${PORT} (IST Timezone Active)`);
 });
