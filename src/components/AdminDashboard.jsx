@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, Cpu, Layers, CheckCircle2, AlertTriangle, Clock, TrendingUp, 
-  BarChart3, Settings, ShieldCheck, UserCheck, Plus, RefreshCw, FileText, Calendar, Filter, Lock, Unlock
+  BarChart3, Settings, ShieldCheck, UserCheck, Plus, RefreshCw, FileText, Calendar, Filter, Lock, Unlock, AlertCircle
 } from 'lucide-react';
 import TargetAllocator from './TargetAllocator.jsx';
 import HistoricalAnalytics from './HistoricalAnalytics.jsx';
@@ -109,7 +109,7 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
   const activeWorkersCount = new Set(assignments.map(a => a.worker_name)).size;
   const activeMachinesCount = new Set(assignments.map(a => a.machine_name)).size;
 
-  const downtimeAlerts = hourlyLogs.filter(l => l.remarks && l.remarks.trim() !== '');
+  const pendingApprovals = hourlyLogs.filter(l => l.produced_qty > 0 && !l.supervisor_approved);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -144,7 +144,7 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
           </button>
         </div>
 
-        {/* Global Date / Shift Filter */}
+        {/* Global Date / Shift Filter (Shift A / Shift B Only) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
             <Calendar size={15} color="var(--accent-cyan)" />
@@ -163,8 +163,8 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
             onChange={(e) => setShift(e.target.value)} 
             style={{ width: '110px', padding: '0.35rem 0.6rem' }}
           >
-            <option value="A">Shift A</option>
-            <option value="B">Shift B</option>
+            <option value="A">Shift A (Day)</option>
+            <option value="B">Shift B (Night)</option>
           </select>
 
           {activeTab === 'live' && (
@@ -184,6 +184,36 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
       ) : (
         /* LIVE OPERATIONS TAB */
         <>
+          {/* Supervisor Pending Approvals Action Banner */}
+          {pendingApprovals.length > 0 && (
+            <div style={{
+              background: 'rgba(234, 179, 8, 0.12)',
+              border: '1px solid rgba(234, 179, 8, 0.35)',
+              borderRadius: '12px',
+              padding: '1rem 1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '1rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Clock color="var(--accent-yellow)" size={22} />
+                <div>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-yellow)' }}>
+                    {pendingApprovals.length} Hourly Production Entries Pending Supervisor Sign-Off
+                  </h4>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Review worker entries below and click "Sign Off" to verify shop-floor output.
+                  </p>
+                </div>
+              </div>
+              <span className="badge badge-yellow" style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}>
+                Action Required
+              </span>
+            </div>
+          )}
+
           {/* Executive KPI Scorecards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
             <div className="glass-panel" style={{ padding: '1.25rem', borderLeft: '4px solid var(--accent-blue)' }}>
@@ -307,50 +337,58 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
                   </tr>
                 </thead>
                 <tbody>
-                  {hourlyLogs.map((log, idx) => {
-                    const pct = log.planned_qty > 0 ? Math.round((log.produced_qty / log.planned_qty) * 100) : 0;
-                    const isUnlocked = log.admin_unlocked === 1;
+                  {hourlyLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                        No hourly logs recorded yet for Shift {shift} on {date}.
+                      </td>
+                    </tr>
+                  ) : (
+                    hourlyLogs.map((log, idx) => {
+                      const pct = log.planned_qty > 0 ? Math.round((log.produced_qty / log.planned_qty) * 100) : 0;
+                      const isUnlocked = log.admin_unlocked === 1;
 
-                    return (
-                      <tr key={idx} style={{ backgroundColor: isUnlocked ? 'rgba(16, 185, 129, 0.06)' : 'transparent' }}>
-                        <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>{log.time_slot}</td>
-                        <td><strong>{log.worker_name}</strong></td>
-                        <td className="font-mono">{log.part_number}</td>
-                        <td className="font-mono">
-                          {log.produced_qty} / {log.planned_qty} ({pct}%)
-                        </td>
-                        <td style={{ color: log.remarks ? 'var(--accent-red)' : 'var(--text-muted)' }}>
-                          {log.remarks || 'Normal operation'}
-                        </td>
-                        <td>
-                          <button
-                            onClick={() => handleToggleUnlock(log, isUnlocked)}
-                            className={`btn ${isUnlocked ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                            style={{ fontSize: '0.75rem', gap: '4px' }}
-                            title={isUnlocked ? 'Worker currently has permission to edit this slot. Click to Lock.' : 'Grant Worker permission to edit Produced Qty.'}
-                          >
-                            {isUnlocked ? <Unlock size={12} color="white" /> : <Lock size={12} />}
-                            {isUnlocked ? 'Unlocked (Granting Access)' : 'Unlock Edit Access'}
-                          </button>
-                        </td>
-                        <td>
-                          {log.supervisor_approved ? (
-                            <span className="badge badge-green"><ShieldCheck size={12} /> Approved</span>
-                          ) : (
-                            <span className="badge badge-yellow">Pending</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <button 
-                            onClick={() => handleToggleApprove(log.id, log.supervisor_approved)}
-                            className={`btn ${log.supervisor_approved ? 'btn-secondary' : 'btn-primary'} btn-sm`}
-                          >
-                            {log.supervisor_approved ? 'Unapprove' : 'Sign Off'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                      return (
+                        <tr key={idx} style={{ backgroundColor: isUnlocked ? 'rgba(16, 185, 129, 0.06)' : 'transparent' }}>
+                          <td className="font-mono" style={{ fontWeight: 700, color: 'var(--accent-cyan)' }}>{log.time_slot}</td>
+                          <td><strong>{log.worker_name}</strong></td>
+                          <td className="font-mono">{log.part_number}</td>
+                          <td className="font-mono">
+                            {log.produced_qty} / {log.planned_qty} ({pct}%)
+                          </td>
+                          <td style={{ color: log.remarks ? 'var(--accent-red)' : 'var(--text-muted)' }}>
+                            {log.remarks || 'Normal operation'}
+                          </td>
+                          <td>
+                            <button
+                              onClick={() => handleToggleUnlock(log, isUnlocked)}
+                              className={`btn ${isUnlocked ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                              style={{ fontSize: '0.75rem', gap: '4px' }}
+                              title={isUnlocked ? 'Worker currently has permission to edit this slot. Click to Lock.' : 'Grant Worker permission to edit Produced Qty.'}
+                            >
+                              {isUnlocked ? <Unlock size={12} color="white" /> : <Lock size={12} />}
+                              {isUnlocked ? 'Unlocked (Granting Access)' : 'Unlock Edit Access'}
+                            </button>
+                          </td>
+                          <td>
+                            {log.supervisor_approved ? (
+                              <span className="badge badge-green"><ShieldCheck size={12} /> Approved</span>
+                            ) : (
+                              <span className="badge badge-yellow"><Clock size={12} /> Pending</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button 
+                              onClick={() => handleToggleApprove(log.id, log.supervisor_approved)}
+                              className={`btn ${log.supervisor_approved ? 'btn-secondary' : 'btn-primary'} btn-sm`}
+                            >
+                              {log.supervisor_approved ? 'Unapprove' : 'Sign Off'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
