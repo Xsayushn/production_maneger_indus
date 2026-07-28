@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sun, Moon, Wrench, LogOut, User, Shield } from 'lucide-react';
+import { io } from 'socket.io-client';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import WorkerInterface from './components/WorkerInterface.jsx';
 import LoginPage from './components/LoginPage.jsx';
@@ -153,49 +154,38 @@ export default function App() {
     setWorkers(prev => [...prev, newWorker]);
   };
 
-  // Authenticated WebSocket Connection with Auto-Reconnect Timer (P0 Fix)
+  // Authenticated Socket.IO Client Connection (P0 Render Cloud Fix)
   useEffect(() => {
     if (!authToken) return;
 
-    let ws = null;
-    let reconnectTimeout = null;
+    let socket;
+    try {
+      socket = io('/', {
+        path: '/socket.io',
+        auth: { token: authToken },
+        transports: ['polling', 'websocket'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: Infinity
+      });
 
-    const connectWs = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws?token=${authToken}`;
-      
-      try {
-        ws = new WebSocket(wsUrl);
+      socket.on('CONNECTED', (msg) => {
+        console.log('Socket.IO connection active:', msg);
+      });
 
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            setLastWsMessage(msg);
-          } catch (e) {
-            console.error('Error parsing WS message', e);
-          }
-        };
+      const handleEvent = (type) => (data) => {
+        setLastWsMessage({ type, data });
+      };
 
-        ws.onclose = (event) => {
-          if (event.code !== 4001 && event.code !== 4002) {
-            // Auto reconnect every 3 seconds if connection drops or cloud proxy times out
-            reconnectTimeout = setTimeout(connectWs, 3000);
-          }
-        };
-
-        ws.onerror = (err) => {
-          console.warn('WebSocket connection warning:', err);
-        };
-      } catch (e) {
-        reconnectTimeout = setTimeout(connectWs, 3000);
-      }
-    };
-
-    connectWs();
+      socket.on('TARGET_UPDATED', handleEvent('TARGET_UPDATED'));
+      socket.on('HOURLY_LOG_UPDATED', handleEvent('HOURLY_LOG_UPDATED'));
+      socket.on('SLOT_UNLOCKED', handleEvent('SLOT_UNLOCKED'));
+    } catch (err) {
+      console.warn('Socket.IO connection warning:', err);
+    }
 
     return () => {
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) ws.close();
+      if (socket) socket.disconnect();
     };
   }, [authToken]);
 

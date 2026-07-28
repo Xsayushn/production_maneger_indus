@@ -1,6 +1,6 @@
 import express from 'express';
 import http from 'http';
-import { WebSocketServer, WebSocket } from 'ws';
+import { Server } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -17,7 +17,17 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Initialize Socket.IO with HTTP Polling & WebSocket Fallbacks (Render Cloud Support)
+const io = new Server(server, {
+  path: '/socket.io',
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  },
+  transports: ['polling', 'websocket'],
+  allowEIO3: true
+});
 
 // 1. Security Headers via Helmet
 app.use(
@@ -74,50 +84,32 @@ export const getISTMinutes = (d = new Date()) => {
   return istDate.getHours() * 60 + istDate.getMinutes();
 };
 
-// Broadcast function to notify connected, authenticated WebSocket clients
+// Broadcast event to connected Socket.IO clients
 const broadcast = (data) => {
-  const message = JSON.stringify(data);
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
-  });
+  io.emit(data.type, data.data);
 };
 
-// WebSocket Authentication & Heartbeat Ping/Pong
-wss.on('connection', (ws, req) => {
-  const urlParams = new URLSearchParams(req.url.split('?')[1]);
-  const token = urlParams.get('token');
+// Socket.IO Handshake Authentication Middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
 
   if (!token) {
-    ws.close(4001, 'Unauthorized: Token required');
-    return;
+    return next(new Error('Unauthorized: Token required'));
   }
 
   const user = verifyToken(token);
   if (!user) {
-    ws.close(4002, 'Unauthorized: Invalid token');
-    return;
+    return next(new Error('Unauthorized: Invalid token'));
   }
 
-  ws.user = user;
-  ws.isAlive = true;
-
-  ws.on('pong', () => { ws.isAlive = true; });
-
-  ws.send(JSON.stringify({ type: 'CONNECTED', message: `Authenticated connection active for ${user.name}` }));
+  socket.user = user;
+  next();
 });
 
-// WS Heartbeat Interval to keep connection alive on cloud hosts
-const wsHeartbeatInterval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) return ws.terminate();
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
-
-wss.on('close', () => clearInterval(wsHeartbeatInterval));
+io.on('connection', (socket) => {
+  console.log(`Socket.IO client connected: ${socket.user?.name} (${socket.user?.role})`);
+  socket.emit('CONNECTED', { message: `Authenticated connection active for ${socket.user?.name}` });
+});
 
 // Initialize DB schema on start
 await initDb();
@@ -735,7 +727,7 @@ if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/socket.io')) {
       return next();
     }
     res.sendFile(path.join(distPath, 'index.html'));
@@ -744,5 +736,5 @@ if (fs.existsSync(distPath)) {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`Production Management Server running on port ${PORT} (IST Timezone Active)`);
+  console.log(`Production Management Server running on port ${PORT} (Socket.IO + IST Active)`);
 });
