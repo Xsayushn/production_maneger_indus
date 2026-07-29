@@ -9,6 +9,7 @@ export default function LoginPage({ siteMode = 'worker', publicWorkers = [], onL
   // Worker login state
   const [selectedWorkerCode, setSelectedWorkerCode] = useState('');
   const [workerSearch, setWorkerSearch] = useState('');
+  const [workerPin, setWorkerPin] = useState('');
 
   const filteredWorkers = publicWorkers.filter(w => 
     w.name.toLowerCase().includes(workerSearch.toLowerCase()) || 
@@ -28,7 +29,8 @@ export default function LoginPage({ siteMode = 'worker', publicWorkers = [], onL
       onLogin({
         role: 'worker',
         workerCode: selectedWorkerCode,
-        workerName: selectedWorker ? selectedWorker.name : workerSearch
+        workerName: selectedWorker ? selectedWorker.name : workerSearch,
+        pin: workerPin
       });
     }
   };
@@ -158,6 +160,19 @@ export default function LoginPage({ siteMode = 'worker', publicWorkers = [], onL
                     ))
                   )}
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Worker Security PIN (Default: 1234)</label>
+                <input
+                  type="password"
+                  className="form-control font-mono"
+                  value={workerPin}
+                  onChange={(e) => setWorkerPin(e.target.value)}
+                  placeholder="Enter 4-digit PIN..."
+                  maxLength={6}
+                  required
+                />
               </div>
             </>
           )}

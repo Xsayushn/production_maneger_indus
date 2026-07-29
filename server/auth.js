@@ -2,11 +2,23 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { get } from './db.js';
 
-const DEFAULT_JWT_SECRET = 'indus_production_jwt_secret_key_2026_industrial';
-const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
+// Strict Environment Variable Check for Production (P0 Security Compliance)
+let JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ FATAL SECURITY ERROR: JWT_SECRET environment variable is missing in production!');
+    console.error('To secure factory operations, set JWT_SECRET in your Render/cloud environment settings.');
+    process.exit(1);
+  } else {
+    // Development Mode Fallback
+    JWT_SECRET = 'indus_dev_secret_key_2026_local_testing_only';
+    console.warn('⚠️ WARNING: Using local development JWT secret. Set JWT_SECRET before deploying to production.');
+  }
+}
 
 export const generateToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' });
 };
 
 export const verifyToken = (token) => {

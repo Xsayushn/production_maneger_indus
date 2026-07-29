@@ -223,6 +223,10 @@ export const initDb = async () => {
     await run(`UPDATE workers SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
     await run(`UPDATE assignments SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
     await run(`UPDATE hourly_logs SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
+
+    // Ensure all workers have an encrypted PIN hash (default PIN '1234')
+    const defaultPinHash = await bcrypt.hash('1234', 10);
+    await run(`UPDATE workers SET password_hash = ? WHERE password_hash IS NULL OR password_hash = ''`, [defaultPinHash]);
   } catch (err) {
     console.warn('Data migration notice:', err.message);
   }

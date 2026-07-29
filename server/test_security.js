@@ -53,14 +53,22 @@ async function runSecurityTests() {
 
     const adminToken = adminData.token;
 
-    // Test 4: Valid worker login
+    // Test 4a: Worker login with invalid PIN
+    const badWorkerRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'worker', workerCode: 'WRK-1001', pin: '9999' })
+    });
+    assert(badWorkerRes.status === 401, 'Test 4a: Reject invalid worker PIN with 401');
+
+    // Test 4b: Worker login with valid PIN (default 1234)
     const workerLoginRes = await fetch(`${BASE_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: 'worker', workerCode: 'WRK-1001' })
+      body: JSON.stringify({ role: 'worker', workerCode: 'WRK-1001', pin: '1234' })
     });
     const workerData = await workerLoginRes.json();
-    assert(workerData.token, 'Test 4: Issue valid JWT token for authenticated Worker');
+    assert(workerLoginRes.status === 200 && workerData.token, 'Test 4b: Issue valid JWT token for authenticated Worker with PIN');
 
     const workerToken = workerData.token;
 

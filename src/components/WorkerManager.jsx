@@ -18,6 +18,7 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
   const [newCode, setNewCode] = useState('');
   const [newDept, setNewDept] = useState('Fin Press');
   const [newShift, setNewShift] = useState('A');
+  const [newPin, setNewPin] = useState('1234');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -25,6 +26,7 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
   const [editWorker, setEditWorker] = useState(null);
   const [editDept, setEditDept] = useState('');
   const [editShift, setEditShift] = useState('');
+  const [editPin, setEditPin] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -63,7 +65,8 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
           name: newName,
           code: newCode || `WRK-${Math.floor(1000 + Math.random() * 9000)}`,
           department: newDept,
-          shift: newShift
+          shift: newShift,
+          pin: newPin || '1234'
         })
       });
 
@@ -74,6 +77,7 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
       setShowAddModal(false);
       setNewName('');
       setNewCode('');
+      setNewPin('1234');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -95,7 +99,6 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
       }
       setSuccessMsg(`Worker ${worker.name} has been ${newStatus === 'active' ? 'reactivated' : 'deactivated'}.`);
       setTimeout(() => setSuccessMsg(''), 3000);
-      // Force page reload to reflect changes (since workers prop is managed in App)
       window.location.reload();
     } catch (err) {
       alert(err.message);
@@ -107,10 +110,13 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
     setEditLoading(true);
     setEditError('');
     try {
+      const payload = { department: editDept, shift: editShift };
+      if (editPin.trim()) payload.pin = editPin;
+
       const res = await apiFetch(`/api/workers/${editWorker.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ department: editDept, shift: editShift })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update worker');
@@ -359,6 +365,19 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
                 </select>
               </div>
 
+              <div className="form-group">
+                <label className="form-label">Worker Security PIN (Default: 1234)</label>
+                <input 
+                  type="password" 
+                  className="form-control font-mono" 
+                  value={newPin} 
+                  onChange={(e) => setNewPin(e.target.value)}
+                  placeholder="Enter 4-digit PIN..." 
+                  maxLength={6}
+                  required
+                />
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary">Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -406,6 +425,18 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
                   <option value="A">Shift A (07:00 - 19:00)</option>
                   <option value="B">Shift B (19:00 - 07:00)</option>
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reset Security PIN (Leave blank to keep current)</label>
+                <input 
+                  type="password" 
+                  className="form-control font-mono" 
+                  value={editPin} 
+                  onChange={(e) => setEditPin(e.target.value)}
+                  placeholder="Enter new PIN..." 
+                  maxLength={6}
+                />
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>

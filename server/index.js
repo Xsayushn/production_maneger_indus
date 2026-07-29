@@ -41,13 +41,19 @@ app.use(
 
 // 2. Restricted CORS
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:3000', 'http://localhost:5000'];
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : [
+      'https://production-maneger-indus.onrender.com',
+      'http://localhost:3000',
+      'http://localhost:5000',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5000'
+    ];
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'production') {
+      if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
       return callback(new Error('CORS policy violation: Origin not allowed.'));
@@ -58,7 +64,7 @@ app.use(
 
 app.use(express.json());
 
-// 3. Rate Limiter for Login Endpoint (Protects against Brute-Force Password Attacks)
+// 3. Rate Limiters (Protects against Brute-Force & Denial-of-Service Attacks)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20, // 20 requests per window
@@ -66,6 +72,16 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
+
+const globalApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { error: 'Too many API requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use('/api/', globalApiLimiter);
 
 // ----------------------------------------------------
 // TIMEZONE PRECISION HELPERS (IST - UTC+5:30)
@@ -146,7 +162,7 @@ app.get('/api/auth/public-workers', async (req, res) => {
 // Server-side Authentication (Admin & Worker Login with Rate Limiting)
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
-    const { role, username, password, workerCode, workerName } = req.body;
+    const { role, username, password, workerCode, workerName, pin } = req.body;
 
     if (role === 'admin') {
       const admin = await get(`SELECT * FROM admins WHERE username = ?`, [username || 'admin']);
@@ -171,6 +187,8 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
         user: { id: admin.id, name: 'System Admin', code: 'ADM-001', role: 'admin' }
       });
     } else {
+      const providedPin = pin || password || '1234';
+
       let worker;
       if (workerCode) {
         worker = await get(`SELECT * FROM workers WHERE code = ? AND status = 'active'`, [workerCode]);
@@ -183,7 +201,21 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
       }
 
       if (!worker) {
-        return res.status(401).json({ error: 'Worker not found or inactive. Please check your Employee Code.' });
+        return res.status(401).json({ error: 'Worker account not found or inactive. Please check Employee Code.' });
+      }
+
+      // PIN Verification (P0 Security Hardening)
+      if (worker.password_hash) {
+        const isPinMatch = await bcrypt.compare(String(providedPin), worker.password_hash);
+        if (!isPinMatch) {
+          return res.status(401).json({ error: 'Invalid Security PIN. Please enter your correct PIN.' });
+        }
+      } else {
+        if (String(providedPin) !== '1234') {
+          return res.status(401).json({ error: 'Invalid Security PIN. Default PIN is 1234.' });
+        }
+        const pinHash = await bcrypt.hash('1234', 10);
+        await run(`UPDATE workers SET password_hash = ? WHERE id = ?`, [pinHash, worker.id]);
       }
 
       const token = generateToken({
@@ -255,15 +287,18 @@ app.post('/api/workers', authenticateToken, requireAdmin, async (req, res) => {
       name: z.string().min(2, 'Name must be at least 2 characters'),
       code: z.string().min(2).optional(),
       department: z.string().optional(),
-      shift: z.string().optional()
+      shift: z.string().optional(),
+      pin: z.string().min(4, 'PIN must be at least 4 digits').optional()
     });
 
     const parsed = schema.parse(req.body);
     const workerCode = parsed.code || `WRK-${Math.floor(1000 + Math.random() * 9000)}`;
+    const pinToHash = parsed.pin || '1234';
+    const pinHash = await bcrypt.hash(pinToHash, 10);
 
     const result = await run(
-      `INSERT INTO workers (name, code, department, shift, role, status) VALUES (?, ?, ?, ?, 'worker', 'active')`,
-      [parsed.name, workerCode, parsed.department || 'Fin Press', parsed.shift || 'A']
+      `INSERT INTO workers (name, code, password_hash, department, shift, role, status) VALUES (?, ?, ?, ?, ?, 'worker', 'active')`,
+      [parsed.name, workerCode, pinHash, parsed.department || 'Fin Press', parsed.shift || 'A']
     );
     res.json({ id: result.id, name: parsed.name, code: workerCode, department: parsed.department, shift: parsed.shift, status: 'active' });
   } catch (err) {
@@ -271,18 +306,32 @@ app.post('/api/workers', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// Update Worker Status / Dept / Shift (Protected by Admin Role & Zod Validation)
+// Update Worker Status / Dept / Shift / PIN (Protected by Admin Role & Zod Validation)
 app.put('/api/workers/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const schema = z.object({
       status: z.enum(['active', 'inactive']).optional(),
       department: z.string().optional(),
-      shift: z.string().optional()
+      shift: z.string().optional(),
+      pin: z.string().min(4, 'PIN must be at least 4 digits').optional()
     });
     const parsed = schema.parse(req.body);
 
     const { id } = req.params;
-    await run(`UPDATE workers SET status = COALESCE(?, status), department = COALESCE(?, department), shift = COALESCE(?, shift) WHERE id = ?`, [parsed.status, parsed.department, parsed.shift, id]);
+    let pinHash = null;
+    if (parsed.pin) {
+      pinHash = await bcrypt.hash(parsed.pin, 10);
+    }
+
+    await run(
+      `UPDATE workers SET 
+        status = COALESCE(?, status), 
+        department = COALESCE(?, department), 
+        shift = COALESCE(?, shift),
+        password_hash = COALESCE(?, password_hash)
+       WHERE id = ?`, 
+      [parsed.status, parsed.department, parsed.shift, pinHash, id]
+    );
     const updated = await get(`SELECT id, name, code, department, shift, role, status FROM workers WHERE id = ?`, [id]);
     res.json(updated);
   } catch (err) {
