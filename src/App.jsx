@@ -77,7 +77,7 @@ export default function App() {
     const activeToken = authToken || localStorage.getItem(keyToken) || '';
 
     const headers = {
-      'Content-Type': 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
       ...(options.headers || {})
     };
@@ -282,6 +282,7 @@ export default function App() {
             machines={machines} 
             lastWsMessage={lastWsMessage} 
             onWorkerAdded={handleWorkerAdded}
+            onRefreshWorkers={fetchMasterData}
             authFetch={authFetch}
           />
         ) : (

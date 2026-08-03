@@ -231,7 +231,7 @@ export default function HistoricalAnalytics({ parts, machines, workers, authFetc
                 <YAxis stroke="#94a3b8" fontSize={12} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '8px', color: '#f8fafc' }} 
-                  formatter={(val, name) => [val.toLocaleString() + ' Pcs', name === 'total_planned' ? 'Planned Target' : 'Actual Output']}
+                  formatter={(val, name) => [(val ?? 0).toLocaleString() + ' Pcs', name === 'total_planned' ? 'Planned Target' : 'Actual Output']}
                 />
                 <Legend formatter={(value) => value === 'total_planned' ? 'Planned Target' : 'Actual Output'} />
                 <Area type="monotone" dataKey="total_planned" stroke="#3b82f6" fillOpacity={1} fill="url(#colorPlanned)" />

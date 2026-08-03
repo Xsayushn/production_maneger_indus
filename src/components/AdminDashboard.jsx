@@ -14,7 +14,7 @@ const getLocalDateString = (d = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-export default function AdminDashboard({ workers, parts, machines, lastWsMessage, onWorkerAdded, authFetch }) {
+export default function AdminDashboard({ workers, parts, machines, lastWsMessage, onWorkerAdded, onRefreshWorkers, authFetch }) {
   const [activeTab, setActiveTab] = useState('live'); // 'live' | 'analytics' | 'workers'
   const [date, setDate] = useState(getLocalDateString());
   const [shift, setShift] = useState('A');
@@ -180,7 +180,7 @@ export default function AdminDashboard({ workers, parts, machines, lastWsMessage
       {activeTab === 'analytics' ? (
         <HistoricalAnalytics parts={parts} machines={machines} workers={workers} authFetch={apiFetch} />
       ) : activeTab === 'workers' ? (
-        <WorkerManager workers={workers} onWorkerAdded={onWorkerAdded} authFetch={apiFetch} />
+        <WorkerManager workers={workers} onWorkerAdded={onWorkerAdded} onRefreshWorkers={onRefreshWorkers} authFetch={apiFetch} />
       ) : (
         /* LIVE OPERATIONS TAB */
         <>

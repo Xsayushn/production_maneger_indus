@@ -36,8 +36,17 @@ const formatSql = (sql) => {
   if (!usePostgres) return sql;
   let paramIndex = 1;
   let formatted = sql.replace(/\?/g, () => `$${paramIndex++}`);
+  // Translate SQLite INSERT OR IGNORE → PostgreSQL ON CONFLICT DO NOTHING
   formatted = formatted.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
   formatted = formatted.replace(/INSERT OR REPLACE INTO/gi, 'INSERT INTO');
+  // If we just stripped OR IGNORE and there's no ON CONFLICT clause, add one
+  if (sql.match(/INSERT OR IGNORE INTO/i) && !formatted.match(/ON CONFLICT/i)) {
+    // Append ON CONFLICT DO NOTHING before any trailing semicolon or at end
+    formatted = formatted.replace(/;\s*$/, ' ON CONFLICT DO NOTHING;');
+    if (!formatted.match(/ON CONFLICT/i)) {
+      formatted = formatted.trimEnd() + ' ON CONFLICT DO NOTHING';
+    }
+  }
   return formatted;
 };
 
@@ -215,11 +224,6 @@ export const initDb = async () => {
 
   // DATA MIGRATION: Normalize legacy department names & remove Shift C from existing records
   try {
-    await run(`UPDATE workers SET department = 'Fin Press' WHERE department LIKE '%Fin Press%' OR department LIKE '%Assembly%';`);
-    await run(`UPDATE workers SET department = 'Expander' WHERE department LIKE '%Expander%' OR department LIKE '%Bending%';`);
-    await run(`UPDATE workers SET department = 'Punching' WHERE department LIKE '%Punching%' OR department LIKE '%Stamp%';`);
-    await run(`UPDATE workers SET department = 'Hairpin' WHERE department LIKE '%Hairpin%' OR department LIKE '%Coil%';`);
-    await run(`UPDATE workers SET department = 'Fin Press' WHERE department NOT IN ('Fin Press', 'Expander', 'Punching', 'Hairpin');`);
     await run(`UPDATE workers SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
     await run(`UPDATE assignments SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
     await run(`UPDATE hourly_logs SET shift = 'A' WHERE shift NOT IN ('A', 'B');`);
@@ -229,6 +233,24 @@ export const initDb = async () => {
     await run(`UPDATE workers SET password_hash = ? WHERE password_hash IS NULL OR password_hash = ''`, [defaultPinHash]);
   } catch (err) {
     console.warn('Data migration notice:', err.message);
+  }
+
+  // DE-DUPLICATION MIGRATION: Remove duplicate workers that were created by
+  // repeated seed runs on PostgreSQL (INSERT OR IGNORE was silently stripped)
+  if (usePostgres) {
+    try {
+      const dupeResult = await pgPool.query(`
+        DELETE FROM workers
+        WHERE id NOT IN (
+          SELECT MIN(id) FROM workers GROUP BY name, department
+        )
+      `);
+      if (dupeResult.rowCount > 0) {
+        console.log(`[Migration] Removed ${dupeResult.rowCount} duplicate worker entries from PostgreSQL.`);
+      }
+    } catch (err) {
+      console.warn('De-duplication migration notice:', err.message);
+    }
   }
 
   // Seed default admin account securely if none exists

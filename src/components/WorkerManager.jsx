@@ -8,7 +8,7 @@ export const STANDARD_DEPARTMENTS = [
   'Hairpin'
 ];
 
-export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
+export default function WorkerManager({ workers, onWorkerAdded, onRefreshWorkers, authFetch }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -99,7 +99,7 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
       }
       setSuccessMsg(`Worker ${worker.name} has been ${newStatus === 'active' ? 'reactivated' : 'deactivated'}.`);
       setTimeout(() => setSuccessMsg(''), 3000);
-      window.location.reload();
+      if (onRefreshWorkers) onRefreshWorkers();
     } catch (err) {
       alert(err.message);
     }
@@ -123,7 +123,7 @@ export default function WorkerManager({ workers, onWorkerAdded, authFetch }) {
       setEditWorker(null);
       setSuccessMsg(`Worker ${editWorker.name} updated successfully.`);
       setTimeout(() => setSuccessMsg(''), 3000);
-      window.location.reload();
+      if (onRefreshWorkers) onRefreshWorkers();
     } catch (err) {
       setEditError(err.message);
     } finally {
