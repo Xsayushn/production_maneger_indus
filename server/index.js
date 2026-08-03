@@ -73,6 +73,11 @@ const loginLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// Health Check Endpoint (Exempt from Rate Limiting for Keep-Alive Pings)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString(), uptime: Math.floor(process.uptime()) });
+});
+
 const globalApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
@@ -789,7 +794,34 @@ if (fs.existsSync(distPath)) {
   });
 }
 
+// Keep-Alive Self-Ping Service for Render Free Tier (Prevents 15-minute idle container sleep)
+const setupKeepAlive = () => {
+  const targetUrl = process.env.RENDER_EXTERNAL_URL 
+    ? `${process.env.RENDER_EXTERNAL_URL}/api/health`
+    : process.env.PUBLIC_URL 
+      ? `${process.env.PUBLIC_URL}/api/health`
+      : 'https://production-maneger-indus.onrender.com/api/health';
+
+  const PING_INTERVAL = 10 * 60 * 1000; // 10 minutes (Render free tier sleeps after 15 min of inactivity)
+
+  console.log(`[Keep-Alive] Initialized self-ping service for ${targetUrl} (Pinging every 10 min)`);
+
+  setInterval(async () => {
+    try {
+      const res = await fetch(targetUrl);
+      if (res.ok) {
+        console.log(`[Keep-Alive] Self-ping successful at ${new Date().toISOString()}`);
+      } else {
+        console.warn(`[Keep-Alive] Self-ping status: ${res.status}`);
+      }
+    } catch (err) {
+      console.warn(`[Keep-Alive] Self-ping notice: ${err.message}`);
+    }
+  }, PING_INTERVAL);
+};
+
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Production Management Server running on port ${PORT} (Socket.IO + IST Active)`);
+  setupKeepAlive();
 });
